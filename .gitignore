@@ -1,0 +1,8 @@
+/lib/
+/node_modules/
+/src/index.js.flow
+/tmp/
+
+# iOS stuff:
+.DS_Store
+/ios/ZanoModule.xcframework/
