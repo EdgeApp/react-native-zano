@@ -8,16 +8,20 @@
 // so we ask the C compiler which headers are actually useful.
 
 import { execSync } from 'child_process'
-import { existsSync, mkdirSync, unlinkSync } from 'fs'
-import { join } from 'path'
 import { makeNodeDisklet } from 'disklet'
+import { existsSync, mkdirSync, unlinkSync } from 'fs'
+import { mkdir, readdir, rm } from 'fs/promises'
+import { join } from 'path'
+import { promisify } from 'util'
 
 const disklet = makeNodeDisklet(join(__dirname, '../'))
+const execFile = promisify(require('child_process').execFile)
 const tmp = join(__dirname, '../tmp')
 
 async function main(): Promise<void> {
   if (!existsSync(tmp)) mkdirSync(tmp)
   await downloadSources()
+  await runZanoScripts()
   await generateIosLibrary()
 }
 
@@ -37,24 +41,51 @@ async function downloadSources(): Promise<void> {
 const defines: string[] = []
 
 // Compiler options:
-const includePaths: string[] = []
+const includePaths: string[] = [
+  'zano_native_lib/Zano/src/wallet'
+]
 
 // Source list:
-const sources: string[] = [
-  'zano-wrapper/zano-methods.cpp'
+const sources: string[] = ['zano-wrapper/zano-methods.cpp']
+
+// Stuff the Zano scripts produce:
+const zanoArchives = [
+  `libcommon`,
+  `libcrypto_`,
+  `libcurrency_core`,
+  `libwallet`,
+  `libz`
 ]
 
 // Phones and simulators we need to support:
-const iosPlatforms: Array<{ sdk: string; arch: string }> = [
-  { sdk: 'iphoneos', arch: 'arm64' },
-  { sdk: 'iphoneos', arch: 'armv7' },
-  { sdk: 'iphoneos', arch: 'armv7s' },
-  { sdk: 'iphonesimulator', arch: 'arm64' },
-  { sdk: 'iphonesimulator', arch: 'x86_64' }
+const iosPlatforms: Array<{ sdk: string; arch: string; zanoLib: string }> = [
+  { sdk: 'iphoneos', arch: 'arm64', zanoLib: 'arm64' },
+  { sdk: 'iphonesimulator', arch: 'arm64', zanoLib: 'arm64_simulator' },
+  { sdk: 'iphonesimulator', arch: 'x86_64', zanoLib: 'x86_64' }
+
+  // Zano does not support these:
+  // { sdk: 'iphoneos', arch: 'armv7' },
+  // { sdk: 'iphoneos', arch: 'armv7s' },
 ]
 const iosSdkTriples: { [sdk: string]: string } = {
   iphoneos: '%arch%-apple-ios9.0',
   iphonesimulator: '%arch%-apple-ios9.0-simulator'
+}
+
+/**
+ * Run the upstream Zano build scripts.
+ */
+async function runZanoScripts(): Promise<void> {
+  try {
+    execSync('./build_ios_libs.sh', {
+      cwd: join(tmp, 'zano_native_lib'),
+      stdio: 'inherit',
+      encoding: 'utf8'
+    })
+  } catch (error) {
+    // We expect the script to fail,
+    // but there isn't a unique error message we can look for
+  }
 }
 
 /**
@@ -72,7 +103,7 @@ async function generateIosLibrary(): Promise<void> {
 
   // Generate a library for each platform:
   const libraries: string[] = []
-  for (const { sdk, arch } of iosPlatforms) {
+  for (const { sdk, arch, zanoLib } of iosPlatforms) {
     const working = join(tmp, `${sdk}-${arch}`)
     if (!existsSync(working)) mkdirSync(working)
 
@@ -111,6 +142,37 @@ async function generateIosLibrary(): Promise<void> {
         `-o ${object}`,
         join(tmp, source)
       ])
+    }
+
+    // Explode Zano archives and gather the objects:
+    for (const archive of zanoArchives) {
+      const arPath = join(
+        tmp,
+        `zano_native_lib/_install_ios/${zanoLib}/lib/${archive}.a`
+      )
+      const cwd = join(working, archive)
+      await rm(cwd, { recursive: true, force: true })
+      await mkdir(cwd, { recursive: true })
+      await execFile('ar', ['-x', arPath], { cwd })
+
+      // Add object files to the list:
+      for (const file of await readdir(cwd)) {
+        if (file.endsWith('.o')) objects.push(join(cwd, file))
+      }
+    }
+
+    // Add the boost objects:
+    const boostPath = join(
+      tmp,
+      `zano_native_lib/_libs_ios/boost/stage/${sdk}/${arch}/obj`
+    )
+    for (const entry of await readdir(boostPath, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const dir = join(boostPath, entry.name)
+        for (const file of await readdir(dir)) {
+          if (file.endsWith('.o')) objects.push(join(dir, file))
+        }
+      }
     }
 
     // Generate a static library:
@@ -166,6 +228,13 @@ function getRepo(name: string, uri: string, hash: string): void {
   // Checkout:
   console.log(`Checking out ${name}...`)
   execSync(`git checkout -f ${hash}`, {
+    cwd: path,
+    stdio: 'inherit',
+    encoding: 'utf8'
+  })
+
+  // Checkout submodules:
+  execSync(`git submodule update --init --recursive`, {
     cwd: path,
     stdio: 'inherit',
     encoding: 'utf8'

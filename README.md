@@ -2,6 +2,10 @@
 
 This library packages Zano C++ client for use on React Native.
 
+Supported platforms:
+
+- iOS
+
 ## Usage
 
 First, add this library to your React Native app using NPM or Yarn, and run `pod install` as necessary to integrate it with your app's native code.
@@ -12,7 +16,7 @@ Here is a simple usage example. Note the `await` on the method call, but not on 
 import { makeZano } from 'react-native-zano'
 
 const zano = makeZano()
-const address = await zano.decodeAddress(...)
+const version = await zano.getVersion()
 ```
 
 We have types too, if you need those:
@@ -23,7 +27,7 @@ import type { CppBridge } from 'react-native-zano'
 
 The available methods are:
 
-- hello
+- getVersion
 
 ## Developing
 

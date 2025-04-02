@@ -24,7 +24,15 @@ export class CppBridge {
     this.module = zanoModule
   }
 
+  async getVersion() : Promise<string> {
+    return await this.module.callZano('getVersion', [])
+  }
+
   async hello() : Promise<string> {
     return await this.module.callZano('hello', [])
+  }
+
+  async initWallet(address: string, cwd: string, logLevel: number) : Promise<string> {
+    return await this.module.callZano('initWallet', [address, cwd, logLevel.toFixed()])
   }
 }

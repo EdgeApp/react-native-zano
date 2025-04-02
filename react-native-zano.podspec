@@ -23,4 +23,5 @@ Pod::Spec.new do |s|
   s.vendored_frameworks = "ios/ZanoModule.xcframework"
 
   s.dependency "React-Core"
+  s.dependency "OpenSSL-Universal"
 end
