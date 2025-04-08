@@ -45,7 +45,7 @@ export async function getZip(name: string, uri: string): Promise<void> {
   await loudExec('unzip', ['-u', path])
 }
 
-export async function fileExists(path): Promise<boolean> {
+export async function fileExists(path: string): Promise<boolean> {
   return await access(path).then(
     () => true,
     () => false
@@ -58,7 +58,7 @@ export async function loudExec(
   opts: { cwd?: string } = {}
 ): Promise<void> {
   const { cwd = tmpPath } = opts
-  return new Promise((resolve, reject) => {
+  return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
       stdio: 'inherit',
@@ -70,7 +70,7 @@ export async function loudExec(
       if (code === 0) {
         resolve()
       } else {
-        reject(new Error(`${command} exited with code ${code}`))
+        reject(new Error(`${command} exited with code ${String(code)}`))
       }
     })
   })

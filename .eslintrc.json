@@ -1,0 +1,23 @@
+{
+  "extends": [
+    "standard-kit/prettier",
+    "standard-kit/prettier/typescript"
+  ],
+  "overrides": [
+    {
+      "files": ["*.ts"]
+    }
+  ],
+  "parserOptions": {
+    "project": "tsconfig.json"
+  },
+  "plugins": [
+    "simple-import-sort"
+  ],
+  "rules": {
+    "@typescript-eslint/promise-function-async": "off",
+    "no-var": "error",
+    "simple-import-sort/imports": "error",
+    "no-return-await": "off"
+  }
+}

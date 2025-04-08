@@ -1,4 +1,5 @@
 import { NativeModules } from 'react-native'
+
 import { CppBridge, NativeZanoModule } from './CppBridge'
 
 export function makeZano(): CppBridge {

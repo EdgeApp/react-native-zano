@@ -9,30 +9,35 @@
  * Pass this object to the `CppBridge` constructor to re-assemble the API.
  */
 export interface NativeZanoModule {
-  readonly callZano: (
-    name: string,
-    jsonArguments: string[]
-  ) => Promise<string>;
+  readonly callZano: (name: string, jsonArguments: string[]) => Promise<string>
 
-  readonly methodNames: string[];
+  readonly methodNames: string[]
 }
 
 export class CppBridge {
-  private module: NativeZanoModule
+  private readonly module: NativeZanoModule
 
-  constructor (zanoModule: NativeZanoModule) {
+  constructor(zanoModule: NativeZanoModule) {
     this.module = zanoModule
   }
 
-  async getVersion() : Promise<string> {
+  async getVersion(): Promise<string> {
     return await this.module.callZano('getVersion', [])
   }
 
-  async hello() : Promise<string> {
+  async hello(): Promise<string> {
     return await this.module.callZano('hello', [])
   }
 
-  async initWallet(address: string, cwd: string, logLevel: number) : Promise<string> {
-    return await this.module.callZano('initWallet', [address, cwd, logLevel.toFixed()])
+  async initWallet(
+    address: string,
+    cwd: string,
+    logLevel: number
+  ): Promise<string> {
+    return await this.module.callZano('initWallet', [
+      address,
+      cwd,
+      logLevel.toFixed()
+    ])
   }
 }

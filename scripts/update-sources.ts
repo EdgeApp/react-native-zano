@@ -31,11 +31,11 @@ import { join } from 'path'
 
 import { getNdkPath } from './utils/android-tools'
 import {
+  fileExists,
   getRepo,
-  quietExec,
   loudExec,
-  tmpPath,
-  fileExists
+  quietExec,
+  tmpPath
 } from './utils/common'
 
 export const srcPath = join(__dirname, '../src')
@@ -229,7 +229,7 @@ async function buildAndroidZano(platform: AndroidPlatform): Promise<void> {
 async function buildIosZano(platform: IosPlatform): Promise<void> {
   const { sdk, arch, cmakePlatform } = platform
   const working = join(tmpPath, `${sdk}-${arch}`)
-  mkdir(working, { recursive: true })
+  await mkdir(working, { recursive: true })
 
   // Find platform tools:
   const ar = await quietExec('xcrun', ['--sdk', sdk, '--find', 'ar'])
@@ -287,7 +287,7 @@ async function buildIosZano(platform: IosPlatform): Promise<void> {
     `-B${join(working, 'cmake')}`,
     // Build options:
     `-DBoost_INCLUDE_DIRS=${join(boostPath, 'include')}`,
-    `-DBoost_LIBRARY_DIRS=${join(boostPath, 'stage/${sdk}/${arch}')}`,
+    `-DBoost_LIBRARY_DIRS=${join(boostPath, `stage/${sdk}/${arch}`)}`,
     `-DBoost_VERSION="1.84.0"`,
     `-DCMAKE_BUILD_TYPE=Release`,
     `-DCMAKE_INSTALL_PREFIX=${working}`,
@@ -355,7 +355,7 @@ async function packageIosZano(): Promise<void> {
   for (const sdk of sdks) {
     console.log(`Merging libraries for ${sdk}...`)
     const outPath = join(tmpPath, `${sdk}-lipo`)
-    mkdir(outPath, { recursive: true })
+    await mkdir(outPath, { recursive: true })
     const output = join(outPath, 'libzano-module.a')
 
     await loudExec('lipo', [

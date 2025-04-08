@@ -1,11 +1,12 @@
 import { join } from 'path'
+
 import { fileExists, loudExec } from './common'
 
 // Matches the Edge app NDK version
 // The Zano build used '27.2.12479018', so we could try upgrading.
 const NDK_VERSION = '26.1.10909125'
 
-export async function getNdkPath() {
+export async function getNdkPath(): Promise<string> {
   const { ANDROID_HOME } = process.env
   if (ANDROID_HOME == null) {
     throw new Error('ANDROID_HOME is not set in the environment.')
