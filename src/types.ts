@@ -1,0 +1,137 @@
+interface JsonRpcResponseBase {
+  id: number
+  jsonrpc: string
+}
+interface JsonRpcResponseSuccess<T> extends JsonRpcResponseBase {
+  result: T
+}
+interface JsonRpcResponseError extends JsonRpcResponseBase {
+  error: {
+    code: string | number
+    message: string
+  }
+}
+export type JsonRpc<T> = JsonRpcResponseSuccess<T> | JsonRpcResponseError
+
+export interface ReturnCode {
+  return_code: string
+}
+
+export interface WalletFiles {
+  items: string[]
+}
+
+export interface AddressInfo {
+  valid: boolean
+  is_integrated: boolean
+  payment_id?: string
+  address: string
+}
+
+export interface ConnectivityStatus {
+  is_online: boolean
+  is_remote_node_mode: boolean
+  is_server_busy: boolean
+  last_daemon_is_disconnected: boolean
+  last_proxy_communicate_timestamp: number
+}
+
+interface AssetInfo {
+  asset_id: string
+  current_supply: number
+  decimal_point: number
+  full_name: string
+  hidden_supply: boolean
+  meta_info: string
+  owner: string
+  owner_eth_pub_key: string
+  ticker: string
+  total_max_supply: number
+}
+
+interface AssetBalance {
+  asset_info: AssetInfo
+  awaiting_in: number
+  awaiting_out: number
+  outs_amount_max: number
+  outs_amount_min: number
+  outs_count: number
+  total: number
+  unlocked: number
+}
+
+export interface WalletDetails {
+  name: string
+  pass: string
+  private_spend_key: string
+  private_view_key: string
+  public_spend_key: string
+  public_view_key: string
+  recent_history: {
+    last_item_index: number
+    total_history_items: number
+  }
+  recovered: boolean
+  seed: string
+  wallet_file_size: number
+  wallet_id: number
+  wallet_local_bc_size: number
+  wi: {
+    address: string
+    balances: AssetBalance[]
+    has_bare_unspent_outputs: boolean
+    is_auditable: boolean
+    is_watch_only: boolean
+    mined_total: number
+    path: string
+    view_sec_key: string
+  }
+}
+
+enum WalletState {
+  SYNCING = 1,
+  SYNCED = 2,
+  ERROR = 3
+}
+export interface WalletStatus {
+  current_daemon_height: number
+  current_wallet_height: number
+  is_daemon_connected: boolean
+  is_in_long_refresh: boolean
+  progress: number
+  wallet_state: WalletState
+}
+
+export interface CloseResponse {
+  response: string
+}
+
+export interface AsyncCallResponse {
+  job_id: number
+}
+
+export type TryPullResultResponse =
+  | {
+      status: 'canceled'
+    }
+  | { status: 'idle' }
+  | {
+      status: 'delivered'
+      result: any | { error: { code: number; message: string } }
+    }
+
+export interface WalletInfoExtended {
+  seed: string
+  spend_private_key: string
+  spend_public_key: string
+  view_private_key: string
+  view_public_key: string
+}
+
+export enum FeePriority {
+  DEFAULT = 0,
+  UNIMPORTANT = 1,
+  NORMAL = 2,
+  ELEVATED = 3,
+  PRIORITY = 4
+}
