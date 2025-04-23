@@ -1,0 +1,6 @@
+{
+  global:
+    Java_app_edge_rnzano_RnZanoModule_*;
+  local:
+    *;
+};

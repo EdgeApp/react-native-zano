@@ -2,17 +2,40 @@
 //
 // It will:
 // - Download third-party source code.
+// - Assemble Android shared libraries for each platform.
 // - Assemble an iOS universal static xcframework.
+//
+// Here is where each puzzle piece comes from:
+//
+// |         | Zano  | OpenSSL           | Boost             |
+// |---------|-------|-------------------|-------------------|
+// | Android | CMake | zano_native_lib   | Boost-for-Android |
+// | iOS     | CMake | OpenSSL-Universal | zano_native_lib   |
+//
+// For both iOS and Android, we build Zano by invoking CMake directly.
+// The zano_native_lib build scripts aren't really useful,
+// since the aren't geared towards React Native auto-linking.
+// Calling CMake ourselves isn't that hard.
+//
+// On Android, the zano_native_lib OpenSSL libraries in are fine,
+// but we have to use Boost-for-Android to get the right STL version.
+//
+// On iOS, the boost libraries are fine,
+// but their OpenSSL is just a re-packaged copy OpenSSL-Universal,
+// so it's simpler to pull that in from CocoaPods directly.
 //
 
 import { mkdir, readdir, rm } from 'fs/promises'
+import { cpus } from 'os'
 import { join } from 'path'
 
+import { getNdkPath } from './utils/android-tools'
 import {
   getRepo,
   quietExec,
   loudExec,
-  tmpPath
+  tmpPath,
+  fileExists
 } from './utils/common'
 
 export const srcPath = join(__dirname, '../src')
@@ -20,6 +43,12 @@ export const srcPath = join(__dirname, '../src')
 async function main(): Promise<void> {
   await mkdir(tmpPath, { recursive: true })
   await downloadSources()
+
+  // Android:
+  await buildAndroidBoost()
+  for (const platform of androidPlatforms) {
+    await buildAndroidZano(platform)
+  }
 
   // iOS:
   for (const platform of iosPlatforms) {
@@ -33,6 +62,11 @@ async function downloadSources(): Promise<void> {
     'zano_native_lib',
     'https://github.com/hyle-team/zano_native_lib.git',
     '391a965d1d609f917cc97908b9d354a7f54e0258'
+  )
+  await getRepo(
+    'Boost-for-Android',
+    'https://github.com/moritz-wundke/Boost-for-Android.git',
+    '51924ec5533a4fefb5edf99feaeded794c06a4fb'
   )
 }
 
@@ -59,11 +93,23 @@ const boostLibs = [
   'timer'
 ]
 
+interface AndroidPlatform {
+  arch: string
+  triple: string
+}
+
 interface IosPlatform {
   sdk: 'iphoneos' | 'iphonesimulator'
   arch: string
   cmakePlatform: string
 }
+
+const androidPlatforms: AndroidPlatform[] = [
+  { arch: 'arm64-v8a', triple: 'aarch64-linux-android33' },
+  { arch: 'armeabi-v7a', triple: 'armv7a-linux-androideabi23' },
+  { arch: 'x86', triple: 'i686-linux-android23' },
+  { arch: 'x86_64', triple: 'x86_64-linux-android23' }
+]
 
 // Phones and simulators we need to support:
 const iosPlatforms: IosPlatform[] = [
@@ -78,6 +124,102 @@ const iosPlatforms: IosPlatform[] = [
 const iosSdkTriples: { [sdk: string]: string } = {
   iphoneos: '%arch%-apple-ios9.0',
   iphonesimulator: '%arch%-apple-ios9.0-simulator'
+}
+
+/**
+ * We compile our own Boost for Android,
+ * because the Zano one is linking with the static STL library,
+ * but we need to link with the shared STL library.
+ */
+async function buildAndroidBoost(): Promise<void> {
+  const boostExists = await fileExists(
+    join(tmpPath, 'Boost-for-Android/build/out/arm64-v8a/lib/libboost_atomic.a')
+  )
+  if (boostExists) return
+
+  const ndkPath = await getNdkPath()
+  await loudExec(
+    './build-android.sh',
+    [
+      `--arch=${androidPlatforms.map(platform => platform.arch).join(',')}`,
+      '--boost=1.84.0',
+      `--with-libraries=${boostLibs.join(',')}`,
+      '--layout=system',
+      ndkPath
+    ],
+    { cwd: join(tmpPath, 'Boost-for-Android') }
+  )
+}
+
+/**
+ * Invokes CMake to build Zano,
+ * followed by clang++ to build the shared library.
+ */
+async function buildAndroidZano(platform: AndroidPlatform): Promise<void> {
+  const { arch, triple } = platform
+  const ndkPath = await getNdkPath()
+  const working = join(tmpPath, `android-${arch}`)
+  const boostPath = join(tmpPath, 'Boost-for-Android/build/out/', arch)
+  const sslPath = join(tmpPath, 'zano_native_lib/_libs_android/openssl')
+  const zanoLibPath = join(tmpPath, `android-${arch}/${arch}/lib/`)
+
+  // Build Zano itself:
+  await loudExec('cmake', [
+    // Source directory:
+    `-S${join(tmpPath, 'zano_native_lib/Zano')}`,
+    // Build directory:
+    `-B${join(working, 'cmake')}`,
+    // Build options:
+    `-DBoost_INCLUDE_DIRS=${join(boostPath, 'include')}`,
+    `-DBoost_LIBRARY_DIRS=${join(boostPath, 'lib')}`,
+    `-DBoost_VERSION="1.84.0"`,
+    `-DCMAKE_ANDROID_ARCH_ABI=${arch}`,
+    `-DCMAKE_ANDROID_NDK=${ndkPath}`,
+    `-DCMAKE_ANDROID_STL_TYPE=c++_shared`,
+    `-DCMAKE_BUILD_TYPE=Release`,
+    `-DCMAKE_INSTALL_PREFIX=${working}`,
+    `-DCMAKE_SYSTEM_NAME=Android`,
+    `-DCMAKE_SYSTEM_VERSION=23`,
+    `-DDISABLE_TOR=TRUE`,
+    `-DOPENSSL_CRYPTO_LIBRARY=${join(sslPath, arch, 'lib/libcrypto.a')}`,
+    `-DOPENSSL_INCLUDE_DIR=${join(sslPath, 'include')}`,
+    `-DOPENSSL_SSL_LIBRARY=${join(sslPath, arch, 'lib/libssl.a')}`
+  ])
+  await loudExec('cmake', [
+    '--build',
+    join(working, 'cmake'),
+    '--config',
+    'Release',
+    '--target',
+    'install',
+    '--',
+    `-j${cpus().length}`
+  ])
+
+  // Build the library:
+  const cxxPath = join(
+    ndkPath,
+    `toolchains/llvm/prebuilt/darwin-x86_64/bin/${triple}-clang++`
+  )
+  const outPath = join(tmpPath, '../android/src/main/jniLibs/', arch)
+  await mkdir(outPath, { recursive: true })
+  const jniSources = [...sources, 'jni/jni.cpp']
+  const sslLibs = ['crypto', 'ssl']
+
+  console.log(`Linking librnzano.so for Android ${arch}`)
+  await loudExec(cxxPath, [
+    '-shared',
+    '-fPIC',
+    `-o${join(outPath, 'librnzano.so')}`,
+    ...includePaths.map(path => `-I${join(tmpPath, path)}`),
+    ...jniSources.map(source => join(srcPath, source)),
+    ...boostLibs.map(name => join(boostPath, `/lib/libboost_${name}.a`)),
+    ...sslLibs.map(name => join(sslPath, `${arch}/lib/lib${name}.a`)),
+    ...zanoLibs.map(name => join(zanoLibPath, `lib${name}.a`)),
+    '-llog',
+    `-Wl,--version-script=${join(srcPath, 'jni/exports.map')}`,
+    '-Wl,--no-undefined'
+  ])
 }
 
 /**
