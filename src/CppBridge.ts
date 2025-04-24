@@ -2,17 +2,23 @@
 
 import {
   AddressInfo,
+  asMaybeBusy,
   AsyncCallResponse,
   CloseResponse,
   ConnectivityStatus,
   FeePriority,
+  GetBalancesResponse,
+  GetRecentTransactionsResponse,
+  GetSeedPhraseInfo,
   JsonRpc,
   ReturnCode,
+  TransferResponse,
   TryPullResultResponse,
   WalletDetails,
   WalletFiles,
   WalletInfoExtended,
-  WalletStatus
+  WalletStatus,
+  WhitelistAssetsResponse
 } from './types'
 
 /**
@@ -200,7 +206,7 @@ export class CppBridge {
     return JSON.parse(response)
   }
 
-  async tryPullResult(arg: number): Promise<TryPullResultResponse> {
+  async tryPullResult<T>(arg: number): Promise<TryPullResultResponse<T>> {
     const response = await this.module.callZano('tryPullResult', [
       arg.toFixed()
     ])
@@ -252,5 +258,261 @@ export class CppBridge {
       priority.toFixed()
     ])
     return parseInt(fee)
+  }
+
+  // -----------------------------------------------------------------------------
+  // Convenience API
+  // -----------------------------------------------------------------------------
+
+  async getSeedPhraseInfo(
+    seed: string,
+    seedPassword: string
+  ): Promise<GetSeedPhraseInfo> {
+    const params: any = {
+      seed_phrase: seed,
+      seed_password: seedPassword
+    }
+    const seedInfo = await this._asyncCallWithRetry<GetSeedPhraseInfo>(
+      'get_seed_phrase_info',
+      0,
+      JSON.stringify(params)
+    )
+
+    return seedInfo
+  }
+
+  async generateSeedPhrase(
+    rpcAddress: string,
+    storagePath: string,
+    seedPassword: string,
+    logLevel: number = -1
+  ): Promise<WalletDetails> {
+    await this.init(rpcAddress, logLevel)
+
+    const response = await this.generate(storagePath, seedPassword)
+
+    const result = this.handleRpcResponse(response)
+    await this.closeWallet(result.wallet_id)
+
+    return result
+  }
+
+  async startWallet(
+    mnemonicSeed: string,
+    seedPassword: string,
+    storagePath: string
+  ): Promise<WalletDetails> {
+    const files = await this.getWalletFiles()
+
+    let items: string[] = []
+    if ('items' in files) {
+      items = files.items
+    }
+
+    if (!items.includes(storagePath)) {
+      const response = await this.restore(
+        mnemonicSeed,
+        storagePath,
+        seedPassword,
+        seedPassword
+      )
+
+      const result = this.handleRpcResponse(response)
+      return result
+    } else {
+      const response = await this.open(storagePath, seedPassword)
+
+      const result = this.handleRpcResponse(response)
+      return result
+    }
+  }
+
+  async stopWallet(walletId: number): Promise<string> {
+    const closeResponse = await this._asyncCallWithRetry<ReturnCode>(
+      'close',
+      walletId,
+      ''
+    )
+    if (closeResponse.return_code !== 'OK') {
+      throw new Error(`${closeResponse.return_code}`)
+    }
+
+    return closeResponse.return_code
+  }
+
+  async removeWallet(walletId: number): Promise<void> {
+    const response = await this.getOpenedWallets()
+    const result = this.handleRpcResponse(response)
+
+    const wallet = result.find(w => w.wallet_id === walletId)
+    if (wallet == null) return
+
+    await this.stopWallet(walletId)
+    await this.deleteWallet(wallet.wi.path)
+  }
+
+  async walletStatus(walletId: number): Promise<WalletStatus> {
+    const walletStatus = await this._asyncCallWithRetry<WalletStatus>(
+      'get_wallet_status',
+      walletId,
+      ''
+    )
+
+    return walletStatus
+  }
+
+  async getBalances(walletId: number): Promise<GetBalancesResponse> {
+    const params = {
+      method: 'getbalance'
+    }
+    const response = await this._asyncCallWithRetry<
+      JsonRpc<GetBalancesResponse>
+    >('invoke', walletId, JSON.stringify(params))
+
+    const result = this.handleRpcResponse(response)
+    return result
+  }
+
+  async getTransactions(
+    walletId: number,
+    offset: number = 0
+  ): Promise<GetRecentTransactionsResponse> {
+    const params = {
+      method: 'get_recent_txs_and_info2',
+      params: {
+        count: 100,
+        exclude_mining_txs: true,
+        exclude_unconfirmed: false,
+        offset,
+        order: 'FROM_BEGIN_TO_END',
+        update_provision_info: true
+      }
+    }
+    const response = await this._asyncCallWithRetry<
+      JsonRpc<GetRecentTransactionsResponse>
+    >('invoke', walletId, JSON.stringify(params))
+
+    const result = this.handleRpcResponse(response)
+    return result
+  }
+
+  async whitelistAssets(walletId: number, assetIds: string[]): Promise<void> {
+    const currentWhitelistParams = {
+      method: 'assets_whitelist_get',
+      params: {}
+    }
+    const whitelistAssetsResponse = await this._asyncCallWithRetry<
+      WhitelistAssetsResponse | {}
+    >('invoke', walletId, JSON.stringify(currentWhitelistParams))
+
+    let whitelistSet: Set<string> = new Set()
+    if ('local_whitelist' in whitelistAssetsResponse) {
+      whitelistSet = new Set(
+        whitelistAssetsResponse.local_whitelist.map(asset => asset.asset_id)
+      )
+    }
+
+    for (const assetId of assetIds) {
+      if (!whitelistSet.has(assetId)) {
+        const addAssetParams = {
+          method: 'assets_whitelist_add',
+          params: {
+            asset_id: assetId
+          }
+        }
+        await this._asyncCallWithRetry(
+          'invoke',
+          walletId,
+          JSON.stringify(addAssetParams)
+        )
+      }
+    }
+  }
+
+  async transfer(
+    walletId: number,
+    transferOpts: {
+      assetId: string
+      fee: number
+      nativeAmount: number
+      recipient: string
+
+      comment?: string
+      paymentId?: string
+    }
+  ): Promise<string> {
+    const params = {
+      method: 'transfer',
+      params: {
+        comment: transferOpts.comment,
+        destinations: [
+          {
+            address: transferOpts.recipient,
+            amount: transferOpts.nativeAmount,
+            asset_id: transferOpts.assetId
+          }
+        ],
+        fee: transferOpts.fee,
+        hide_receiver: true,
+        mixin: 15,
+        payment_id: transferOpts.paymentId ?? '',
+        push_payer: false,
+        service_entries_permanent: true
+      }
+    }
+    const response = await this._asyncCallWithRetry<JsonRpc<TransferResponse>>(
+      'invoke',
+      walletId,
+      JSON.stringify(params)
+    )
+
+    const result = this.handleRpcResponse(response)
+    return result.tx_hash
+  }
+
+  // -----------------------------------------------------------------------------
+  // Utils
+  // -----------------------------------------------------------------------------
+
+  private handleRpcResponse<T>(json: JsonRpc<T>): T {
+    if ('result' in json) {
+      return json.result
+    } else if ('error' in json) {
+      throw new Error(`${json.error.code} ${json.error.message}`)
+    } else {
+      throw new Error('Unknown error')
+    }
+  }
+
+  private async _asyncCallWithRetry<T>(
+    methodName: string,
+    instanceId: number,
+    params: string
+  ): Promise<T> {
+    while (true) {
+      const jobIdResponse = await this.asyncCall(methodName, instanceId, params)
+
+      while (true) {
+        const tryPullResponse = await this.tryPullResult<T>(
+          jobIdResponse.job_id
+        )
+
+        await new Promise(resolve => setTimeout(resolve, 100)) // 100 ms recommended by documentation
+        if (tryPullResponse.status === 'idle') {
+          // try this again. job ID is still valid
+          continue
+        } else if (tryPullResponse.status === 'delivered') {
+          const error = asMaybeBusy(tryPullResponse.result)
+          if (error != null) {
+            // try this again. job ID is no longer valid
+            break
+          }
+
+          return tryPullResponse.result as T
+        } else if (tryPullResponse.status === 'canceled') {
+          throw new Error(`${methodName} job canceled`)
+        }
+      }
+    }
   }
 }

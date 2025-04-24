@@ -48,5 +48,8 @@
     "rimraf": "^3.0.2",
     "sucrase": "^3.16.0",
     "typescript": "5.0.4"
+  },
+  "dependencies": {
+    "cleaners": "^0.3.17"
   }
 }

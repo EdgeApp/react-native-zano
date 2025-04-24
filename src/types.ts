@@ -1,3 +1,5 @@
+import { asMaybe, asObject, asValue } from 'cleaners'
+
 interface JsonRpcResponseBase {
   id: number
   jsonrpc: string
@@ -110,15 +112,23 @@ export interface AsyncCallResponse {
   job_id: number
 }
 
-export type TryPullResultResponse =
+export type TryPullResultResponse<T> =
   | {
       status: 'canceled'
     }
   | { status: 'idle' }
   | {
       status: 'delivered'
-      result: any | { error: { code: number; message: string } }
+      result: T | { error: { code: number; message: string } }
     }
+
+export const asMaybeBusy = asMaybe(
+  asObject({
+    error: asObject({
+      message: asValue('BUSY')
+    })
+  })
+)
 
 export interface WalletInfoExtended {
   seed: string
@@ -134,4 +144,114 @@ export enum FeePriority {
   NORMAL = 2,
   ELEVATED = 3,
   PRIORITY = 4
+}
+
+export interface GetSeedPhraseInfo {
+  error_code: string
+  response_data: {
+    address: string
+    hash_sum_matched: boolean
+    require_password: boolean
+    syntax_correct: boolean
+    tracking: boolean
+  }
+}
+
+interface AssetInfo {
+  asset_id: string
+  current_supply: number
+  decimal_point: number
+  full_name: string
+  hidden_supply: boolean
+  meta_info: string
+  owner: string
+  owner_eth_pub_key: string
+  ticker: string
+  total_max_supply: number
+}
+
+interface AssetBalance {
+  asset_info: AssetInfo
+  awaiting_in: number
+  awaiting_out: number
+  outs_amount_max: number
+  outs_amount_min: number
+  outs_count: number
+  total: number
+  unlocked: number
+}
+
+export interface GetBalancesResponse {
+  balance: number
+  balances: AssetBalance[]
+  unlocked_balance: number
+}
+
+export interface RecentTransaction {
+  comment?: string
+  employed_entries: {
+    receive?: Array<{
+      amount: number
+      asset_id: string
+      index: number
+    }>
+    spent?: Array<{
+      amount: number
+      asset_id: string
+      index: number
+    }>
+  }
+  fee: number
+  height: number
+  is_mining: boolean
+  is_mixing: boolean
+  is_service: boolean
+  payment_id: string
+  show_sender: boolean
+  subtransfers: Array<{
+    amount: number
+    asset_id: string
+    is_income: boolean
+  }>
+  timestamp: number
+  transfer_internal_index: number
+  tx_blob_size: number
+  tx_hash: string
+  tx_type: number
+  unlock_time: number
+}
+
+export interface GetRecentTransactionsResponse {
+  last_item_index: number
+  pi: {
+    balance: number
+    curent_height: number
+    transfer_entries_count: number
+    transfers_count: number
+    unlocked_balance: number
+  }
+  total_transfers: number
+  transfers?: RecentTransaction[]
+}
+
+export interface WhitelistAssetsResponse {
+  global_whitelist: AssetInfo[]
+  local_whitelist: AssetInfo[]
+  own_assets: AssetInfo[]
+}
+
+export interface TransferParams {
+  assetId: string
+  fee: number
+  nativeAmount: number
+  recipient: string
+
+  comment?: string
+  paymentId?: string
+}
+
+export interface TransferResponse {
+  tx_hash: string
+  tx_size: number
+  tx_unsigned_hex: '' // SDK transfer method immediately broadcasts funcs. This field is currently an empty string.
 }
