@@ -26,9 +26,18 @@ We have types too, if you need those:
 import type { CppBridge } from 'react-native-zano'
 ```
 
-The available methods are:
+All methods available in Zano's `plain_wallet_api` are available here. In addition, there are convenience methods that provide higher-level abstractions by combining multiple raw asynchronous API calls and handling common error cases:
 
-- getVersion
+- getSeedPhraseInfo - Returns information about a seed phrase
+- generateSeedPhrase - Creates a new seed phrase
+- startWallet - Opens an existing wallet or creates a new one if it doesn't exist
+- stopWallet - Safely closes a wallet
+- removeWallet - Deletes a wallet from the system
+- walletStatus - Gets the current status of a wallet
+- getBalances - Retrieves the balance information for a wallet
+- getTransactions - Fetches recent transactions for a wallet
+- whitelistAssets - Add assetIds to wallet's local whitelist
+- transfer - Sends funds to another wallet
 
 ## Developing
 
