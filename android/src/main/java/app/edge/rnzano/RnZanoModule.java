@@ -25,6 +25,7 @@ public class RnZanoModule extends ReactContextBaseJavaModule {
   public Map<String, Object> getConstants() {
     final Map<String, Object> constants = new HashMap<>();
     constants.put("methodNames", getMethodNames());
+    constants.put("documentDirectory", getReactApplicationContext().getFilesDir().getAbsolutePath());
     return constants;
   }
 

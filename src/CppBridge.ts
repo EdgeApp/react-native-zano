@@ -12,6 +12,7 @@ export interface NativeZanoModule {
   readonly callZano: (name: string, jsonArguments: string[]) => Promise<string>
 
   readonly methodNames: string[]
+  readonly documentDirectory: string
 }
 
 export class CppBridge {
