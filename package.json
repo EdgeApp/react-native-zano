@@ -1,6 +1,6 @@
 {
   "name": "react-native-zano",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "React Native bindings for the Zano blockchain",
   "homepage": "https://github.com/EdgeApp/react-native-zano",
   "repository": {
@@ -10,7 +10,7 @@
   "license": "BSD-3-Clause",
   "author": "Airbitz, Inc.",
   "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "types": "lib/src/index.d.ts",
   "files": [
     "/android/",
     "/CHANGELOG.md",
