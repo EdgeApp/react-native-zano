@@ -68,7 +68,19 @@ RCT_REMAP_METHOD(
       encoding:NSUTF8StringEncoding];
     out[i] = name;
   }
-  return @{ @"methodNames": out };
+  
+  NSFileManager *fileManager = [NSFileManager defaultManager];
+  NSURL *docsDir = [fileManager URLForDirectory:NSDocumentDirectory 
+    inDomain:NSUserDomainMask 
+    appropriateForURL:nil 
+    create:YES 
+    error:nil];
+  NSString *docsPath = [docsDir path];
+  
+  return @{ 
+    @"methodNames": out,
+    @"documentDirectory": docsPath
+  };
 }
 
 @end
