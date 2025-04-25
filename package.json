@@ -12,6 +12,7 @@
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "files": [
+    "/android/",
     "/CHANGELOG.md",
     "/ios/",
     "/lib/",
@@ -26,7 +27,6 @@
   },
   "devDependencies": {
     "@types/node": "^14.14.7",
-    "disklet": "^0.4.6",
     "sucrase": "^3.16.0",
     "typescript": "^5.8.2"
   }

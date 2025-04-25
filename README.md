@@ -4,13 +4,14 @@ This library packages Zano C++ client for use on React Native.
 
 Supported platforms:
 
+- Android
 - iOS
 
 ## Usage
 
 First, add this library to your React Native app using NPM or Yarn, and run `pod install` as necessary to integrate it with your app's native code.
 
-Here is a simple usage example. Note the `await` on the method call, but not on the require:
+Here is a simple usage example:
 
 ```js
 import { makeZano } from 'react-native-zano'
@@ -40,6 +41,7 @@ npm run update-sources
 This script does the following tasks:
 
 - Download third-party source code.
+- Compile shared libraries for Android.
 - Compile an iOS universal static library and put it into an XCFramework.
 
 The `update-sources` script is also the place to make edits when upgrading any of the third-party dependencies. The react-native-zano repo doesn't include these third-party C++ sources, since they are enormous.
