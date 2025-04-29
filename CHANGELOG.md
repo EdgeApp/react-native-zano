@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.1.2 (2025-04-29)
+
+- fixed: Republish with missing .so files
+
 ## 0.1.1 (2025-04-25)
 
 - fixed: package.json types path

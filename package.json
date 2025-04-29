@@ -1,6 +1,6 @@
 {
   "name": "react-native-zano",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "React Native bindings for the Zano blockchain",
   "homepage": "https://github.com/EdgeApp/react-native-zano",
   "repository": {
@@ -12,7 +12,8 @@
   "main": "lib/index.js",
   "types": "lib/src/index.d.ts",
   "files": [
-    "/android/",
+    "/android/build.gradle",
+    "/android/src/",
     "/CHANGELOG.md",
     "/ios/",
     "/lib/",
@@ -27,6 +28,7 @@
   "scripts": {
     "fix": "npm run lint -- --fix",
     "lint": "eslint .",
+    "prepack": "npm run update-sources",
     "prepare": "husky install && lint-staged && rimraf lib && tsc",
     "update-sources": "ZERO_AR_DATE=1 node -r sucrase/register ./scripts/update-sources.ts"
   },
