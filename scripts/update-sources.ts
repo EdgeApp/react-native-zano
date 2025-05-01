@@ -25,7 +25,7 @@
 // so it's simpler to pull that in from CocoaPods directly.
 //
 
-import { mkdir, readdir, rm } from 'fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises'
 import { cpus } from 'os'
 import { join } from 'path'
 
@@ -68,6 +68,12 @@ async function downloadSources(): Promise<void> {
     'https://github.com/moritz-wundke/Boost-for-Android.git',
     '51924ec5533a4fefb5edf99feaeded794c06a4fb'
   )
+
+  // Rename the compress function in RIPEMD160.c,
+  // since that conflicts with Zlib:
+  const mdPath = join(tmpPath, 'zano_native_lib/Zano/src/crypto/RIPEMD160.h')
+  const mdText = await readFile(mdPath, 'utf8')
+  await writeFile(mdPath, '#define compress md_compress\n' + mdText)
 }
 
 // Compiler options:
