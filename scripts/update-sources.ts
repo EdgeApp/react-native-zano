@@ -122,8 +122,8 @@ const iosPlatforms: IosPlatform[] = [
   // { sdk: 'iphoneos', arch: 'armv7s' },
 ]
 const iosSdkTriples: { [sdk: string]: string } = {
-  iphoneos: '%arch%-apple-ios9.0',
-  iphonesimulator: '%arch%-apple-ios9.0-simulator'
+  iphoneos: '%arch%-apple-ios13.0',
+  iphonesimulator: '%arch%-apple-ios13.0-simulator'
 }
 
 /**
@@ -245,7 +245,7 @@ async function buildIosZano(platform: IosPlatform): Promise<void> {
   ]
   const cflags = [
     ...includePaths.map(path => `-I${join(tmpPath, path)}`),
-    '-miphoneos-version-min=9.0',
+    '-miphoneos-version-min=13.0',
     '-O2',
     '-Werror=partial-availability'
   ]
