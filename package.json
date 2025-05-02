@@ -9,7 +9,7 @@
   },
   "license": "BSD-3-Clause",
   "author": "Airbitz, Inc.",
-  "main": "lib/index.js",
+  "main": "lib/src/index.js",
   "types": "lib/src/index.d.ts",
   "files": [
     "/android/build.gradle",
