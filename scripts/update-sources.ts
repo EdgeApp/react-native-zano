@@ -25,7 +25,7 @@
 // so it's simpler to pull that in from CocoaPods directly.
 //
 
-import { mkdir, readdir, rm } from 'fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'fs/promises'
 import { cpus } from 'os'
 import { join } from 'path'
 
@@ -37,6 +37,7 @@ import {
   quietExec,
   tmpPath
 } from './utils/common'
+import { getObjcopyPath } from './utils/ios-tools'
 
 export const srcPath = join(__dirname, '../src')
 
@@ -68,6 +69,12 @@ async function downloadSources(): Promise<void> {
     'https://github.com/moritz-wundke/Boost-for-Android.git',
     '51924ec5533a4fefb5edf99feaeded794c06a4fb'
   )
+
+  // Rename the compress function in RIPEMD160.c,
+  // since that conflicts with Zlib:
+  const mdPath = join(tmpPath, 'zano_native_lib/Zano/src/crypto/RIPEMD160.h')
+  const mdText = await readFile(mdPath, 'utf8')
+  await writeFile(mdPath, '#define compress md_compress\n' + mdText)
 }
 
 // Compiler options:
@@ -122,8 +129,8 @@ const iosPlatforms: IosPlatform[] = [
   // { sdk: 'iphoneos', arch: 'armv7s' },
 ]
 const iosSdkTriples: { [sdk: string]: string } = {
-  iphoneos: '%arch%-apple-ios9.0',
-  iphonesimulator: '%arch%-apple-ios9.0-simulator'
+  iphoneos: '%arch%-apple-ios13.0',
+  iphonesimulator: '%arch%-apple-ios13.0-simulator'
 }
 
 /**
@@ -235,6 +242,8 @@ async function buildIosZano(platform: IosPlatform): Promise<void> {
   const ar = await quietExec('xcrun', ['--sdk', sdk, '--find', 'ar'])
   const cc = await quietExec('xcrun', ['--sdk', sdk, '--find', 'clang'])
   const cxx = await quietExec('xcrun', ['--sdk', sdk, '--find', 'clang++'])
+  const ld = await quietExec('xcrun', ['--sdk', sdk, '--find', 'ld'])
+  const objcopy = await getObjcopyPath()
   const sdkFlags = [
     '-arch',
     arch,
@@ -245,7 +254,7 @@ async function buildIosZano(platform: IosPlatform): Promise<void> {
   ]
   const cflags = [
     ...includePaths.map(path => `-I${join(tmpPath, path)}`),
-    '-miphoneos-version-min=9.0',
+    '-miphoneos-version-min=13.0',
     '-O2',
     '-Werror=partial-availability'
   ]
@@ -310,37 +319,35 @@ async function buildIosZano(platform: IosPlatform): Promise<void> {
     'install'
   ])
 
-  // Explode Zano archives and gather the objects:
-  async function unpackLib(libPath: string, name: string): Promise<void> {
-    console.log(`Unpacking lib${name}.a`)
-    const outPath = join(working, `unpack/${name}`)
-    await rm(outPath, { recursive: true, force: true })
-    await mkdir(outPath, { recursive: true })
-    await loudExec('ar', ['-x', libPath], { cwd: outPath })
+  // Link everything together into a single giant .o file:
+  console.log(`Linking zano-module.o for ${sdk} ${arch}`)
+  const objectPath = join(working, 'zano-module.o')
+  await loudExec(ld, [
+    '-r',
+    '-o',
+    objectPath,
+    ...objects,
+    ...boostLibs.map(name =>
+      join(boostPath, `stage/${sdk}/${arch}/libboost_${name}.a`)
+    ),
+    ...zanoLibs.map(name => join(working, `lib/lib${name}.a`))
+  ])
 
-    // Add object files to the list:
-    for (const file of await readdir(outPath)) {
-      if (file.endsWith('.o')) objects.push(join(outPath, file))
-    }
-  }
-  for (const lib of zanoLibs) {
-    await unpackLib(join(working, `lib/lib${lib}.a`), lib)
-  }
-  for (const lib of boostLibs) {
-    await unpackLib(
-      join(
-        tmpPath,
-        `zano_native_lib/_libs_ios/boost/stage/${sdk}/${arch}/libboost_${lib}.a`
-      ),
-      `boost_${lib}`
-    )
-  }
+  // Localize all symbols except the ones we really want,
+  // hiding them from future linking steps:
+  await loudExec(objcopy, [
+    objectPath,
+    '-w',
+    '-L*',
+    '-L!_zanoMethods',
+    '-L!_zanoMethodCount'
+  ])
 
   // Generate a static library:
   console.log(`Building static library for ${sdk}-${arch}...`)
   const library = join(working, `libzano-module.a`)
   await rm(library, { force: true })
-  await loudExec(ar, ['rcs', library, ...objects])
+  await loudExec(ar, ['rcs', library, objectPath])
 }
 
 /**
