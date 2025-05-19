@@ -431,31 +431,46 @@ export class CppBridge {
 
   async transfer(
     walletId: number,
-    transferOpts: {
-      assetId: string
-      fee: number
-      nativeAmount: number
-      recipient: string
+    opts: {
+      transfers: Array<{
+        assetId: string
+        nativeAmount: number
+        recipient: string
+      }>
 
       comment?: string
+      fee: number
       paymentId?: string
     }
   ): Promise<string> {
+    // Transaction can only have one payment ID
+    let paymentId = opts.paymentId
+    for (const transfer of opts.transfers) {
+      const addressInfo = await this.getAddressInfo(transfer.recipient)
+      if (!addressInfo.is_integrated) continue
+
+      if (paymentId == null) {
+        paymentId = addressInfo.payment_id
+      } else if (paymentId !== addressInfo.payment_id) {
+        throw new Error('Transaction can only have one payment ID')
+      }
+    }
+
     const params = {
       method: 'transfer',
       params: {
-        comment: transferOpts.comment,
-        destinations: [
-          {
-            address: transferOpts.recipient,
-            amount: transferOpts.nativeAmount,
-            asset_id: transferOpts.assetId
-          }
-        ],
-        fee: transferOpts.fee,
+        destinations: opts.transfers.map(t => ({
+          address: t.recipient,
+          amount: t.nativeAmount,
+          asset_id: t.assetId
+        })),
+
+        comment: opts.comment,
+        fee: opts.fee,
+        payment_id: opts.paymentId ?? '',
+
         hide_receiver: true,
         mixin: 15,
-        payment_id: transferOpts.paymentId ?? '',
         push_payer: false,
         service_entries_permanent: true
       }

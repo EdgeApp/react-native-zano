@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- changed: `transfer` now accepts an array of destinations.
+
 ## 0.1.3 (2025-05-05)
 
 - fixed: Shield symbols for iOS builds using partial linking and symbol encapsulation.
