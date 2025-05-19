@@ -241,12 +241,14 @@ export interface WhitelistAssetsResponse {
 }
 
 export interface TransferParams {
-  assetId: string
-  fee: number
-  nativeAmount: number
-  recipient: string
+  transfers: Array<{
+    assetId: string
+    nativeAmount: number
+    recipient: string
+  }>
 
   comment?: string
+  fee: number
   paymentId?: string
 }
 
