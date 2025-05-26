@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0 (2025-05-26)
+
 - changed: `transfer` now accepts an array of destinations.
 
 ## 0.1.3 (2025-05-05)
