@@ -225,7 +225,8 @@ async function buildAndroidZano(platform: AndroidPlatform): Promise<void> {
     ...zanoLibs.map(name => join(zanoLibPath, `lib${name}.a`)),
     '-llog',
     `-Wl,--version-script=${join(srcPath, 'jni/exports.map')}`,
-    '-Wl,--no-undefined'
+    '-Wl,--no-undefined',
+    '-Wl,-z,max-page-size=16384'
   ])
 }
 
