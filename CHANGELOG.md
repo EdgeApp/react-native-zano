@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- added: `getPrivateViewKey` method to retrieve the private view key for a wallet.
+
 ## 0.2.0 (2025-05-26)
 
 - changed: `transfer` now accepts an array of destinations.

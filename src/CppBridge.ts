@@ -242,6 +242,16 @@ export class CppBridge {
     return JSON.parse(response)
   }
 
+  /**
+   * Get the private view key for a wallet.
+   * This key allows viewing incoming transactions without spending ability.
+   * WARNING: This is sensitive information - handle with care!
+   */
+  async getPrivateViewKey(walletId: number): Promise<string> {
+    const walletInfo = await this.getWalletInfo(walletId)
+    return walletInfo.wi_extended.view_private_key
+  }
+
   async resetWalletPassword(
     walletId: number,
     password: string
