@@ -59,4 +59,5 @@ For this to work, you need:
 
 - A recent Android SDK, installed at `$ANDROID_HOME`
 - Xcode command-line tools
+- `cmake`, provided by `brew install cmake`
 - `llvm-objcopy`, provided by `brew install llvm`

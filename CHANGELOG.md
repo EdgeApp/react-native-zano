@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.1 (2025-07-21)
+
+- fixed: Support 16k pages for Android 15.
+
 ## 0.2.0 (2025-05-26)
 
 - changed: `transfer` now accepts an array of destinations.
