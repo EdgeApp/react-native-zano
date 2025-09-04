@@ -485,6 +485,42 @@ export class CppBridge {
     return result.tx_hash
   }
 
+  async burnAsset(
+    walletId: number,
+    opts: {
+      assetId: string
+      burnAmount: number
+      nativeAmount?: number
+      pointTxToAddress?: string
+      serviceEntries?: Array<{
+        body: string
+        flags: number
+        instruction: string
+        security: string
+        service_id: string
+      }>
+    }
+  ): Promise<string> {
+    const params = {
+      method: 'burn_asset',
+      params: {
+        asset_id: opts.assetId,
+        burn_amount: opts.burnAmount,
+        native_amount: opts.nativeAmount ?? 0,
+        point_tx_to_address: opts.pointTxToAddress ?? '',
+        service_entries: opts.serviceEntries ?? []
+      }
+    }
+    const response = await this._asyncCallWithRetry<JsonRpc<TransferResponse>>(
+      'invoke',
+      walletId,
+      JSON.stringify(params)
+    )
+
+    const result = this.handleRpcResponse(response)
+    return JSON.stringify(result)
+  }
+
   // -----------------------------------------------------------------------------
   // Utils
   // -----------------------------------------------------------------------------
