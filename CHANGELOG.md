@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- added: Add `burnAsset` method
+
 ## 0.2.1 (2025-07-21)
 
 - fixed: Support 16k pages for Android 15.
