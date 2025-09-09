@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.2 (2025-09-09)
+
 - added: Add `burnAsset` method
 
 ## 0.2.1 (2025-07-21)
