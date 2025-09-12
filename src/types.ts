@@ -257,3 +257,17 @@ export interface TransferResponse {
   tx_size: number
   tx_unsigned_hex: '' // SDK transfer method immediately broadcasts funcs. This field is currently an empty string.
 }
+
+export interface BurnAssetParams {
+  assetId: string
+  burnAmount: number
+  nativeAmount?: number
+  pointTxToAddress?: string
+  serviceEntries?: Array<{
+    body: string
+    flags?: number
+    instruction: string
+    security?: string
+    service_id: string
+  }>
+}

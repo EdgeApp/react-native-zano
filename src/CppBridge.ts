@@ -4,6 +4,7 @@ import {
   AddressInfo,
   asMaybeBusy,
   AsyncCallResponse,
+  BurnAssetParams,
   CloseResponse,
   ConnectivityStatus,
   FeePriority,
@@ -12,6 +13,7 @@ import {
   GetSeedPhraseInfo,
   JsonRpc,
   ReturnCode,
+  TransferParams,
   TransferResponse,
   TryPullResultResponse,
   WalletDetails,
@@ -429,20 +431,7 @@ export class CppBridge {
     }
   }
 
-  async transfer(
-    walletId: number,
-    opts: {
-      transfers: Array<{
-        assetId: string
-        nativeAmount: number
-        recipient: string
-      }>
-
-      comment?: string
-      fee: number
-      paymentId?: string
-    }
-  ): Promise<string> {
+  async transfer(walletId: number, opts: TransferParams): Promise<string> {
     // Transaction can only have one payment ID
     let paymentId = opts.paymentId
     for (const transfer of opts.transfers) {
@@ -485,22 +474,7 @@ export class CppBridge {
     return result.tx_hash
   }
 
-  async burnAsset(
-    walletId: number,
-    opts: {
-      assetId: string
-      burnAmount: number
-      nativeAmount?: number
-      pointTxToAddress?: string
-      serviceEntries?: Array<{
-        body: string
-        flags: number
-        instruction: string
-        security: string
-        service_id: string
-      }>
-    }
-  ): Promise<string> {
+  async burnAsset(walletId: number, opts: BurnAssetParams): Promise<string> {
     const params = {
       method: 'burn_asset',
       params: {
