@@ -5,6 +5,7 @@ import {
   asMaybeBusy,
   AsyncCallResponse,
   BurnAssetParams,
+  BurnAssetResponse,
   CloseResponse,
   ConnectivityStatus,
   FeePriority,
@@ -485,14 +486,14 @@ export class CppBridge {
         service_entries: opts.serviceEntries ?? []
       }
     }
-    const response = await this._asyncCallWithRetry<JsonRpc<TransferResponse>>(
+    const response = await this._asyncCallWithRetry<JsonRpc<BurnAssetResponse>>(
       'invoke',
       walletId,
       JSON.stringify(params)
     )
 
     const result = this.handleRpcResponse(response)
-    return JSON.stringify(result)
+    return result.tx_id
   }
 
   // -----------------------------------------------------------------------------

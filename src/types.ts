@@ -271,3 +271,7 @@ export interface BurnAssetParams {
     service_id: string
   }>
 }
+
+export interface BurnAssetResponse {
+  tx_id: string
+}
