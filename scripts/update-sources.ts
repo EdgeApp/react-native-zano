@@ -39,7 +39,7 @@ import {
 } from './utils/common'
 import { getObjcopyPath } from './utils/ios-tools'
 
-export const srcPath = join(__dirname, '../src')
+const srcPath = join(__dirname, '../src')
 
 async function main(): Promise<void> {
   await mkdir(tmpPath, { recursive: true })
@@ -231,8 +231,8 @@ async function buildAndroidZano(platform: AndroidPlatform): Promise<void> {
 }
 
 /**
- * Invokes CMake to build Zano, then breaks open the resulting .a files
- * and re-assembles them into one giant .a file.
+ * Invokes CMake to build Zano,
+ * then combines everything into a big .o file.
  */
 async function buildIosZano(platform: IosPlatform): Promise<void> {
   const { sdk, arch, cmakePlatform } = platform
