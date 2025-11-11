@@ -47,7 +47,7 @@ Java_app_edge_rnzano_RnZanoModule_callZanoJNI(
     try {
       const std::string out = zanoMethods[i].method(strings);
       return env->NewStringUTF(out.c_str());
-    } catch (std::exception e) {
+    } catch (std::exception &e) {
       env->ThrowNew(env->FindClass("java/lang/Exception"), e.what());
       return nullptr;
     } catch (...) {

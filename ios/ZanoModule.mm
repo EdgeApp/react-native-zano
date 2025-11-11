@@ -41,7 +41,7 @@ RCT_REMAP_METHOD(
       resolve(
         [NSString stringWithCString:out.c_str() encoding:NSUTF8StringEncoding]
       );
-    } catch (std::exception e) {
+    } catch (std::exception &e) {
       reject(
         @"Error",
         [NSString stringWithCString:e.what() encoding:NSUTF8StringEncoding],
@@ -68,16 +68,16 @@ RCT_REMAP_METHOD(
       encoding:NSUTF8StringEncoding];
     out[i] = name;
   }
-  
+
   NSFileManager *fileManager = [NSFileManager defaultManager];
-  NSURL *docsDir = [fileManager URLForDirectory:NSDocumentDirectory 
-    inDomain:NSUserDomainMask 
-    appropriateForURL:nil 
-    create:YES 
+  NSURL *docsDir = [fileManager URLForDirectory:NSDocumentDirectory
+    inDomain:NSUserDomainMask
+    appropriateForURL:nil
+    create:YES
     error:nil];
   NSString *docsPath = [docsDir path];
-  
-  return @{ 
+
+  return @{
     @"methodNames": out,
     @"documentDirectory": docsPath
   };
