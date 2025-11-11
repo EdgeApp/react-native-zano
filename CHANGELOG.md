@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fixed: Show proper messages for C++ errors.
+
 ## 0.2.4 (2025-09-19)
 
 - fixed: Re-publish with correctly-built binaries.
