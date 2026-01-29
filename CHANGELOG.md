@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.2.6 (2026-01-29)
+
+- changed: Update `zano_native_lib` to `239d4a39`
+
 ## 0.2.5 (2025-11-17)
 
 - fixed: Show proper messages for C++ errors.
