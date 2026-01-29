@@ -62,7 +62,7 @@ async function downloadSources(): Promise<void> {
   await getRepo(
     'zano_native_lib',
     'https://github.com/hyle-team/zano_native_lib.git',
-    '391a965d1d609f917cc97908b9d354a7f54e0258'
+    '239d4a391a92e6f1816540084b725499d9f4accc'
   )
   await getRepo(
     'Boost-for-Android',
@@ -317,7 +317,9 @@ async function buildIosZano(platform: IosPlatform): Promise<void> {
     '--config',
     'Release',
     '--target',
-    'install'
+    'install',
+    '--',
+    'CODE_SIGNING_ALLOWED=NO'
   ])
 
   // Link everything together into a single giant .o file:
