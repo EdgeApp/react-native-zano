@@ -23,7 +23,7 @@ Java_app_edge_rnzano_RnZanoModule_callZanoJNI(
 
   // Re-package the arguments:
   jsize length = env->GetArrayLength(arguments);
-  std::vector<const std::string> strings;
+  std::vector<std::string> strings;
   strings.reserve(length);
   for (jsize i = 0; i < length; ++i) {
     jstring string = (jstring)env->GetObjectArrayElement(arguments, i);
