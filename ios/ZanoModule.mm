@@ -18,7 +18,7 @@ RCT_REMAP_METHOD(
 
   // Re-package the arguments:
   NSUInteger length = [arguments count];
-  std::vector<const std::string> strings;
+  std::vector<std::string> strings;
   strings.reserve(length);
   for (NSUInteger i = 0; i < length; ++i) {
     NSString *string = [arguments objectAtIndex:i];

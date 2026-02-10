@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fixed: Remove invalid const qualifier from std::vector element types to fix Xcode 26 builds
+
 ## 0.2.6 (2026-01-29)
 
 - changed: Update `zano_native_lib` to `239d4a39`
