@@ -25,9 +25,10 @@ export interface WalletFiles {
 
 export interface AddressInfo {
   valid: boolean
+  auditable: boolean
   is_integrated: boolean
   payment_id?: string
-  address: string
+  wrap: boolean
 }
 
 export interface ConnectivityStatus {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fixed: Add missing `wrap` and `auditable` fields to `AddressInfo` type
+
 ## 0.2.6 (2026-01-29)
 
 - changed: Update `zano_native_lib` to `239d4a39`
