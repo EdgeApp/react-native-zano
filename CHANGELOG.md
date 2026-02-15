@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.7 (2026-02-15)
+
 - fixed: Add missing `wrap` and `auditable` fields to `AddressInfo` type
 
 ## 0.2.6 (2026-01-29)
