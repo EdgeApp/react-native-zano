@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fixed: Remove invalid const qualifier from std::vector element types to fix Xcode 26 builds
+
 ## 0.2.7 (2026-02-15)
 
 - fixed: Add missing `wrap` and `auditable` fields to `AddressInfo` type
