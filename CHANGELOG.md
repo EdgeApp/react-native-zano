@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.8 (2026-02-23)
+
 - fixed: Remove invalid const qualifier from std::vector element types to fix Xcode 26 builds
 
 ## 0.2.7 (2026-02-15)
