@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- changed: Convert the build tooling from Yarn to npm.
+- security: Upgrade dependencies per Socket security recommendations.
+
 ## 0.2.8 (2026-02-23)
 
 - fixed: Remove invalid const qualifier from std::vector element types to fix Xcode 26 builds
