@@ -1,1 +1,4 @@
 /lib/
+/tmp/
+/android/src/main/jniLibs/
+/ios/ZanoModule.xcframework/
