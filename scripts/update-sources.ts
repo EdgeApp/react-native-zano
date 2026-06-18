@@ -62,7 +62,7 @@ async function downloadSources(): Promise<void> {
   await getRepo(
     'zano_native_lib',
     'https://github.com/hyle-team/zano_native_lib.git',
-    '239d4a391a92e6f1816540084b725499d9f4accc'
+    '91085c0ebd95fcdae3327071a9e5f5b615d7da3d'
   )
   await getRepo(
     'Boost-for-Android',
@@ -231,13 +231,29 @@ async function buildAndroidZano(platform: AndroidPlatform): Promise<void> {
 }
 
 /**
- * Invokes CMake to build Zano,
- * then combines everything into a big .o file.
+ * Compiles our wrapper and links it against the prebuilt
+ * libzano-plain-wallet static library (which already bundles Zano,
+ * Boost, and OpenSSL), then localizes symbols into a static lib.
+ *
+ * As of zano_native_lib HF6, the repo no longer ships the raw
+ * `_libs_ios` OpenSSL/Boost archives we used to build Zano from
+ * source against. Instead it provides prebuilt xcframeworks, so we
+ * link the plain-wallet bundle directly.
  */
 async function buildIosZano(platform: IosPlatform): Promise<void> {
-  const { sdk, arch, cmakePlatform } = platform
+  const { sdk, arch } = platform
   const working = join(tmpPath, `${sdk}-${arch}`)
   await mkdir(working, { recursive: true })
+
+  // The prebuilt plain-wallet xcframework slice for this SDK:
+  const slice = sdk === 'iphoneos' ? 'ios-arm64' : 'ios-arm64_x86_64-simulator'
+  const framework = join(
+    tmpPath,
+    'zano_native_lib/_install_ios/lib/libzano-plain-wallet.xcframework',
+    slice
+  )
+  const zanoLib = join(framework, 'libzano-plain-wallet.a')
+  const headersPath = join(framework, 'Headers')
 
   // Find platform tools:
   const ar = await quietExec('xcrun', ['--sdk', sdk, '--find', 'ar'])
@@ -254,7 +270,7 @@ async function buildIosZano(platform: IosPlatform): Promise<void> {
     await quietExec('xcrun', ['--sdk', sdk, '--show-sdk-path'])
   ]
   const cflags = [
-    ...includePaths.map(path => `-I${join(tmpPath, path)}`),
+    `-I${headersPath}`,
     '-miphoneos-version-min=13.0',
     '-O2',
     '-Werror=partial-availability'
@@ -283,57 +299,19 @@ async function buildIosZano(platform: IosPlatform): Promise<void> {
     ])
   }
 
-  // Build Zano itself:
-  const boostPath = join(tmpPath, `zano_native_lib/_libs_ios/boost`)
-  const sslPath = join(tmpPath, `zano_native_lib/_libs_ios/OpenSSL/${sdk}`)
-  const iosToolchain = join(
-    tmpPath,
-    'zano_native_lib/ios-cmake/ios.toolchain.cmake'
-  )
-  await loudExec('cmake', [
-    // Source directory:
-    `-S${join(tmpPath, 'zano_native_lib/Zano')}`,
-    // Build directory:
-    `-B${join(working, 'cmake')}`,
-    // Build options:
-    `-DBoost_INCLUDE_DIRS=${join(boostPath, 'include')}`,
-    `-DBoost_LIBRARY_DIRS=${join(boostPath, `stage/${sdk}/${arch}`)}`,
-    `-DBoost_VERSION="1.84.0"`,
-    `-DCMAKE_BUILD_TYPE=Release`,
-    `-DCMAKE_INSTALL_PREFIX=${working}`,
-    `-DCMAKE_SYSTEM_NAME=iOS`,
-    `-DCMAKE_TOOLCHAIN_FILE=${iosToolchain}`,
-    `-DCMAKE_XCODE_ATTRIBUTE_ONLY_ACTIVE_ARCH=NO`,
-    `-DDISABLE_TOR=TRUE`,
-    `-DOPENSSL_CRYPTO_LIBRARY=${join(sslPath, 'lib/libcrypto.a')}`,
-    `-DOPENSSL_INCLUDE_DIR=${join(sslPath, 'include')}`,
-    `-DOPENSSL_SSL_LIBRARY=${join(sslPath, 'lib/libssl.a')}`,
-    `-DPLATFORM=${cmakePlatform}`,
-    `-GXcode`
-  ])
-  await loudExec('cmake', [
-    '--build',
-    join(working, 'cmake'),
-    '--config',
-    'Release',
-    '--target',
-    'install',
-    '--',
-    'CODE_SIGNING_ALLOWED=NO'
-  ])
-
-  // Link everything together into a single giant .o file:
+  // Link our wrapper against the prebuilt plain-wallet library
+  // into a single relocatable object. `ld -r` pulls in only the
+  // archive members our wrapper transitively needs:
   console.log(`Linking zano-module.o for ${sdk} ${arch}`)
   const objectPath = join(working, 'zano-module.o')
   await loudExec(ld, [
     '-r',
+    '-arch',
+    arch,
     '-o',
     objectPath,
     ...objects,
-    ...boostLibs.map(name =>
-      join(boostPath, `stage/${sdk}/${arch}/libboost_${name}.a`)
-    ),
-    ...zanoLibs.map(name => join(working, `lib/lib${name}.a`))
+    zanoLib
   ])
 
   // Localize all symbols except the ones we really want,
