@@ -62,7 +62,10 @@ async function downloadSources(): Promise<void> {
   await getRepo(
     'zano_native_lib',
     'https://github.com/hyle-team/zano_native_lib.git',
-    '91085c0ebd95fcdae3327071a9e5f5b615d7da3d'
+    '91085c0ebd95fcdae3327071a9e5f5b615d7da3d',
+    // The repo keeps prebuilt archives for every platform in Git LFS,
+    // but we only link against these two:
+    { lfsIncludes: ['_install_ios/**', '_libs_android/**'] }
   )
   await getRepo(
     'Boost-for-Android',
