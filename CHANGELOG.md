@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- changed: Update `zano_native_lib` to `91085c0` for Zano HF6 support.
+- changed: Build the iOS library against the prebuilt `libzano-plain-wallet` xcframework, since `zano_native_lib` no longer ships the raw `_libs_ios` OpenSSL and Boost archives.
+- changed: Fetch only the pinned commit and the Git LFS objects we build against, instead of cloning the full history along with every platform's prebuilt archives.
+
 ## 0.3.0 (2026-06-13)
 
 - changed: Convert the build tooling from Yarn to npm.
