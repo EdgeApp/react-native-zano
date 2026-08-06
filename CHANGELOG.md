@@ -2,9 +2,15 @@
 
 ## Unreleased
 
+- added: `startWallet` accepts an optional `log` callback that reports wallet-file recovery and migration events.
+- added: A `ZanoError` class carrying the native API return code as `error.code`. Thrown error messages keep their existing `<code> <message>` shape.
+- added: A unit-test suite (`npm test`) that runs the bridge against a fake native module.
 - changed: Update `zano_native_lib` to `91085c0` for Zano HF6 support.
 - changed: Build the iOS library against the prebuilt `libzano-plain-wallet` xcframework, since `zano_native_lib` no longer ships the raw `_libs_ios` OpenSSL and Boost archives.
 - changed: Fetch only the pinned commit and the Git LFS objects we build against, instead of cloning the full history along with every platform's prebuilt archives.
+- fixed: Native failures reported as success-shaped payloads (`INTERNAL_ERROR`, `UNINITIALIZED`) now throw instead of resolving with a wallet whose `wallet_id` is undefined.
+- fixed: `generateSeedPhrase` no longer leaves a temporary wallet file on disk, encrypted with the seed passphrase, as a side effect of generating a seed.
+- security: `startWallet` now encrypts the wallet file with a password derived from the mnemonic, instead of with the seed passphrase — which is the empty string for most wallets, leaving the seed and spend keys effectively unencrypted on disk. Files written by earlier versions are re-keyed in place the first time they open; a file no known password opens is deleted and rebuilt from the mnemonic, which costs one re-scan.
 
 ## 0.3.0 (2026-06-13)
 

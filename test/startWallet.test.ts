@@ -1,0 +1,231 @@
+import { strict as assert } from 'assert'
+
+import { CppBridge } from '../src/CppBridge'
+import { ZanoError } from '../src/types'
+import { deriveWalletFilePassword } from '../src/walletFilePassword'
+import { FakeState, FakeWalletFile, makeFakeZanoModule } from './fakeZanoModule'
+
+const MNEMONIC =
+  'like like like like like like like like like like like like like like like like like like like like like like like like shoulder mom'
+const STORAGE_PATH = 'AA'
+const DERIVED = deriveWalletFilePassword(MNEMONIC)
+
+const makeState = (file?: FakeWalletFile): FakeState => {
+  const files = new Map<string, FakeWalletFile>()
+  if (file != null) files.set(STORAGE_PATH, file)
+  return { calls: [], files }
+}
+
+const makeBridge = (state: FakeState): CppBridge =>
+  new CppBridge(makeFakeZanoModule(state))
+
+describe('startWallet', () => {
+  it('creates a missing file with the derived password, not the seed passphrase', async () => {
+    const state = makeState()
+    const bridge = makeBridge(state)
+
+    const wallet = await bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH)
+
+    assert.equal(typeof wallet.wallet_id, 'number')
+    const file = state.files.get(STORAGE_PATH)
+    assert.equal(file?.filePassword, DERIVED)
+    // The regression this guards: one value used for the file password and
+    // the seed password. The restore call must carry both, distinct:
+    assert.ok(
+      state.calls.includes(
+        `restore(${MNEMONIC},${STORAGE_PATH},${DERIVED},hunter2)`
+      ),
+      `restore call not found in: ${state.calls.join('\n')}`
+    )
+  })
+
+  it('opens a file already on the derived password without touching it', async () => {
+    const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
+    const bridge = makeBridge(state)
+
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    const joined = state.calls.join('\n')
+    assert.ok(!joined.includes('resetWalletPassword'))
+    assert.ok(!joined.includes('restore'))
+    assert.ok(!joined.includes('deleteWallet'))
+  })
+
+  it('re-keys a file encrypted with the empty string', async () => {
+    const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
+    const bridge = makeBridge(state)
+
+    const wallet = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    assert.equal(typeof wallet.wallet_id, 'number')
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+    // The exact sequence: probe with the new password, open legacy, re-key
+    // in memory, close to persist, then verify by reopening:
+    assert.deepEqual(state.calls, [
+      'getWalletFiles()',
+      `open(${STORAGE_PATH},${DERIVED})`,
+      `open(${STORAGE_PATH},)`,
+      `resetWalletPassword(1,${DERIVED})`,
+      'closeWallet(1)',
+      `open(${STORAGE_PATH},${DERIVED})`
+    ])
+  })
+
+  it('re-keys a file encrypted with a real seed passphrase', async () => {
+    const state = makeState({ filePassword: 'hunter2', mnemonic: MNEMONIC })
+    const bridge = makeBridge(state)
+
+    await bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH)
+
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+  })
+
+  it('is idempotent across launches', async () => {
+    const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
+    const bridge = makeBridge(state)
+
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    state.calls.length = 0
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    assert.ok(!state.calls.join('\n').includes('resetWalletPassword'))
+  })
+
+  it('rebuilds the file when resetWalletPassword does not report OK', async () => {
+    // Covers the native-exception case too, where the response is a JSON
+    // blob rather than a bare return code:
+    const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
+    state.resetResult = '{"error":{"code":"INTERNAL_ERROR"}}'
+    const bridge = makeBridge(state)
+
+    const wallet = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    assert.equal(typeof wallet.wallet_id, 'number')
+    assert.ok(state.calls.join('\n').includes('deleteWallet'))
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+  })
+
+  it('leaves the file alone when it cannot release the wallet', async () => {
+    // Closing is what writes the re-keyed file, so a failed close means the
+    // migration never reached disk. It also means the wallet is still open on
+    // that file, which makes deleting it the wrong move -- the legacy file is
+    // intact, so the next start just tries the migration again:
+    const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
+    state.closeResult = 'FAIL:disk full'
+    const bridge = makeBridge(state)
+
+    await assert.rejects(bridge.startWallet(MNEMONIC, '', STORAGE_PATH))
+
+    assert.ok(!state.calls.join('\n').includes('deleteWallet'))
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, '')
+  })
+
+  it('rethrows ALREADY_EXISTS from the verifying re-open', async () => {
+    // A concurrent open between our close and our re-open. The file is
+    // already migrated at that point, and the caller recovers by adopting the
+    // open wallet, so this must not fall through to the destructive rebuild:
+    const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
+    state.openResults = [
+      undefined, // the probe with the derived password
+      undefined, // the legacy open
+      JSON.stringify({
+        id: 0,
+        jsonrpc: '2.0',
+        error: { code: 'ALREADY_EXISTS', message: '' }
+      })
+    ]
+    const bridge = makeBridge(state)
+
+    await assert.rejects(
+      bridge.startWallet(MNEMONIC, '', STORAGE_PATH),
+      (error: unknown) => {
+        assert.ok(error instanceof ZanoError)
+        assert.equal(error.code, 'ALREADY_EXISTS')
+        return true
+      }
+    )
+
+    assert.ok(!state.calls.join('\n').includes('deleteWallet'))
+    // The re-key itself persisted, so the adopted wallet is on a migrated
+    // file:
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+  })
+
+  it('rebuilds the file when no known password opens it', async () => {
+    const state = makeState({
+      filePassword: 'something else',
+      mnemonic: MNEMONIC
+    })
+    const bridge = makeBridge(state)
+
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    assert.ok(state.calls.join('\n').includes('deleteWallet'))
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+  })
+
+  it('rethrows ALREADY_EXISTS with the historical message shape', async () => {
+    // edge-currency-accountbased recovers from a concurrent open by
+    // matching `error.message.includes('ALREADY_EXISTS')`:
+    const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
+    state.openResult = JSON.stringify({
+      id: 0,
+      jsonrpc: '2.0',
+      error: { code: 'ALREADY_EXISTS', message: '' }
+    })
+    const bridge = makeBridge(state)
+
+    await assert.rejects(
+      bridge.startWallet(MNEMONIC, '', STORAGE_PATH),
+      (error: unknown) => {
+        assert.ok(error instanceof ZanoError)
+        assert.ok(error.message.includes('ALREADY_EXISTS'))
+        assert.equal(error.code, 'ALREADY_EXISTS')
+        return true
+      }
+    )
+    // And it must not have fallen through to the delete-and-rebuild path:
+    assert.ok(!state.calls.join('\n').includes('deleteWallet'))
+  })
+
+  it('does not try legacy passwords after a non-password failure', async () => {
+    const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
+    state.openResult = JSON.stringify({
+      id: 0,
+      jsonrpc: '2.0',
+      error: { code: 'INVALID_FILE', message: '' }
+    })
+    const bridge = makeBridge(state)
+
+    await assert.rejects(bridge.startWallet(MNEMONIC, '', STORAGE_PATH))
+    assert.equal(state.calls.filter(call => call.startsWith('open(')).length, 1)
+  })
+
+  it('reports migration through the optional log callback', async () => {
+    const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
+    const bridge = makeBridge(state)
+    const logged: string[] = []
+
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH, {
+      log: message => logged.push(message)
+    })
+
+    assert.ok(logged.some(line => line.includes('re-keyed')))
+  })
+})
+
+describe('generateSeedPhrase', () => {
+  it('leaves no wallet file behind', async () => {
+    const state = makeState()
+    const bridge = makeBridge(state)
+
+    const wallet = await bridge.generateSeedPhrase(
+      'http://example.invalid',
+      STORAGE_PATH,
+      ''
+    )
+
+    assert.equal(typeof wallet.seed, 'string')
+    assert.equal(state.files.size, 0)
+  })
+})
