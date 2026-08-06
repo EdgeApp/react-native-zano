@@ -39,12 +39,14 @@ import {
   tmpPath
 } from './utils/common'
 import { getObjcopyPath } from './utils/ios-tools'
+import { findSdkFolders, sdkFolders } from './utils/sdkFolders'
 
 const srcPath = join(__dirname, '../src')
 
 async function main(): Promise<void> {
   await mkdir(tmpPath, { recursive: true })
   await downloadSources()
+  await checkSdkFolders()
 
   // Android:
   await buildAndroidBoost()
@@ -79,6 +81,56 @@ async function downloadSources(): Promise<void> {
   const mdPath = join(tmpPath, 'zano_native_lib/Zano/src/crypto/RIPEMD160.h')
   const mdText = await readFile(mdPath, 'utf8')
   await writeFile(mdPath, '#define compress md_compress\n' + mdText)
+}
+
+/**
+ * Fails the build if the SDK declares a directory we do not know about.
+ *
+ * The SDK writes into directories it derives from the working directory the
+ * app hands it, and on iOS those have to be pre-created so they can be
+ * excluded from device backups -- the wallet files hold the seed and spend
+ * keys. That list lives in `ios/ZanoModule.mm` and cannot be derived at
+ * build time, so it has to be maintained by hand.
+ *
+ * Bumping the `zano_native_lib` pin is the only way a new directory can
+ * appear, and this script is what performs that bump, so this is the one
+ * place that always sees the new source. Without this check a new directory
+ * would ship silently, un-excluded, with nothing in the repo's diff to show
+ * for it -- `tmp/` is gitignored, so a pin bump reviews as a changed hash.
+ *
+ * This catches directories declared as `#define`d folder names, which is how
+ * the SDK has always declared them. It cannot catch a path composed inline,
+ * so it is a tripwire rather than a proof.
+ */
+async function checkSdkFolders(): Promise<void> {
+  const apiPath = join(
+    tmpPath,
+    'zano_native_lib/Zano/src/wallet/plain_wallet_api.cpp'
+  )
+  const apiText = await readFile(apiPath, 'utf8')
+  const found = findSdkFolders(apiText)
+
+  const missing = found.filter(name => !sdkFolders.includes(name))
+  if (missing.length > 0) {
+    throw new Error(
+      `The Zano SDK declares directories this package does not handle: ` +
+        `${missing.join(', ')}. Add them to \`sdkFolders\` here and to the ` +
+        '`prepareZanoDirectory` calls in `ios/ZanoModule.mm`, so they are ' +
+        'created and excluded from device backups.'
+    )
+  }
+
+  const extra = sdkFolders.filter(name => !found.includes(name))
+  if (extra.length > 0) {
+    // Not fatal, since an unused directory is harmless. It usually means the
+    // SDK renamed something, in which case the new name failed above.
+    console.log(
+      `Note: the SDK no longer declares ${extra.join(', ')}. ` +
+        'These can probably be dropped from `sdkFolders`.'
+    )
+  }
+
+  console.log(`Checked SDK directories: ${found.join(', ')}`)
 }
 
 // Compiler options:
