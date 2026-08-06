@@ -106,8 +106,9 @@ static void prepareZanoDirectory(NSURL *parent, NSString *name)
     error:nil];
   NSString *docsPath = [docsDir path];
 
-  // Every directory the SDK derives from the working directory we hand it,
-  // as declared in its `plain_wallet_api.cpp`:
+  // Every directory the SDK derives from the working directory we hand it.
+  // `scripts/update-sources.ts` fails the build if this list drifts from the
+  // folder names declared in the SDK's `plain_wallet_api.cpp`.
   prepareZanoDirectory(docsDir, @"wallets");
   prepareZanoDirectory(docsDir, @"logs");
   prepareZanoDirectory(docsDir, @"app_config");

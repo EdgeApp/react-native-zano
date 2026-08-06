@@ -5,6 +5,7 @@
 - added: `startWallet` accepts an optional `log` callback that reports wallet-file recovery and migration events.
 - added: A `ZanoError` class carrying the native API return code as `error.code`. Thrown error messages keep their existing `<code> <message>` shape.
 - added: A unit-test suite (`npm test`) that runs the bridge against a fake native module.
+- added: `update-sources.ts` fails the build if the Zano SDK declares a directory this package does not create and exclude from backups, so bumping the SDK pin cannot silently introduce an unprotected one.
 - changed: Update `zano_native_lib` to `91085c0` for Zano HF6 support.
 - changed: Build the iOS library against the prebuilt `libzano-plain-wallet` xcframework, since `zano_native_lib` no longer ships the raw `_libs_ios` OpenSSL and Boost archives.
 - changed: Fetch only the pinned commit and the Git LFS objects we build against, instead of cloning the full history along with every platform's prebuilt archives.
