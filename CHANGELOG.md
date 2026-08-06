@@ -11,6 +11,7 @@
 - fixed: Native failures reported as success-shaped payloads (`INTERNAL_ERROR`, `UNINITIALIZED`) now throw instead of resolving with a wallet whose `wallet_id` is undefined.
 - fixed: `generateSeedPhrase` no longer leaves a temporary wallet file on disk, encrypted with the seed passphrase, as a side effect of generating a seed.
 - security: `startWallet` now encrypts the wallet file with a password derived from the mnemonic, instead of with the seed passphrase, which is the empty string for most wallets, leaving the seed and spend keys effectively unencrypted on disk. Files written by earlier versions are re-keyed in place the first time they open. A file that no known password opens is deleted and rebuilt from the mnemonic, costing one re-scan, unless the wallet has a seed passphrase. That case throws instead, since a passphrase that does not match the file would otherwise rebuild a different wallet over an intact one.
+- security: Exclude every iOS directory the SDK writes into -- `wallets`, `logs` and `app_config` -- from device backups, so the wallet files no longer reach an unencrypted Finder backup. Android stores these in private app storage and already sets `android:allowBackup="false"`.
 
 ## 0.3.0 (2026-06-13)
 
