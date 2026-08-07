@@ -1,4 +1,5 @@
 #import "ZanoModule.h"
+#import <React/RCTLog.h>
 #include "zano-methods.hpp"
 
 @implementation ZanoModule
@@ -60,6 +61,34 @@ RCT_REMAP_METHOD(
   );
 }
 
+/**
+ * Creates a directory the Zano SDK writes into, and keeps it out of
+ * device backups. The wallet files hold the seed and spend keys, so they
+ * must not reach an unencrypted Finder backup.
+ *
+ * The SDK creates these itself on first use, but only we can set the
+ * backup flag, and that requires the directory to already exist.
+ */
+static void prepareZanoDirectory(NSURL *parent, NSString *name)
+{
+  NSURL *url = [parent URLByAppendingPathComponent:name isDirectory:YES];
+
+  NSError *error = nil;
+  if (![[NSFileManager defaultManager] createDirectoryAtURL:url
+        withIntermediateDirectories:YES
+        attributes:nil
+        error:&error]) {
+    RCTLogWarn(@"zano could not create %@: %@", name, error);
+    return;
+  }
+
+  if (![url setResourceValue:@YES
+        forKey:NSURLIsExcludedFromBackupKey
+        error:&error]) {
+    RCTLogWarn(@"zano could not exclude %@ from backups: %@", name, error);
+  }
+}
+
 - (NSDictionary *)constantsToExport
 {
   NSMutableArray *out = [NSMutableArray arrayWithCapacity:zanoMethodCount];
@@ -76,6 +105,13 @@ RCT_REMAP_METHOD(
     create:YES
     error:nil];
   NSString *docsPath = [docsDir path];
+
+  // Every directory the SDK derives from the working directory we hand it.
+  // `scripts/update-sources.ts` fails the build if this list drifts from the
+  // folder names declared in the SDK's `plain_wallet_api.cpp`.
+  prepareZanoDirectory(docsDir, @"wallets");
+  prepareZanoDirectory(docsDir, @"logs");
+  prepareZanoDirectory(docsDir, @"app_config");
 
   return @{
     @"methodNames": out,
