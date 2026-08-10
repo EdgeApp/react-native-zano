@@ -21,8 +21,10 @@ import {
   WalletFiles,
   WalletInfoExtended,
   WalletStatus,
-  WhitelistAssetsResponse
+  WhitelistAssetsResponse,
+  ZanoError
 } from './types'
+import { deriveWalletFilePassword } from './walletFilePassword'
 
 /**
  * The shape of the native C++ module exposed to React Native.
@@ -37,6 +39,14 @@ export interface NativeZanoModule {
 
   readonly methodNames: string[]
   readonly documentDirectory: string
+}
+
+function isWrongPassword(error: unknown): boolean {
+  return error instanceof ZanoError && error.code === 'WRONG_PASSWORD'
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return error instanceof ZanoError && error.code === 'ALREADY_EXISTS'
 }
 
 export class CppBridge {
@@ -294,40 +304,225 @@ export class CppBridge {
 
     const response = await this.generate(storagePath, seedPassword)
 
-    const result = this.handleRpcResponse(response)
+    const result = this.expectWallet(this.handleRpcResponse(response))
     await this.closeWallet(result.wallet_id)
+
+    // `generate` writes a wallet file as a side effect, encrypted with
+    // `seedPassword` -- typically the empty string. The caller only wants
+    // the seed, so remove the file; the first `startWallet` recreates it
+    // via `restore`, encrypted with the derived password. If this delete
+    // silently fails (the native layer reports OK regardless), the leftover
+    // file is re-keyed by `startWallet`'s migration instead.
+    await this.deleteWallet(storagePath)
 
     return result
   }
 
+  /**
+   * Opens the wallet file at `storagePath`, creating it from the mnemonic if
+   * it does not exist.
+   *
+   * The file on disk is encrypted with a password derived from the mnemonic,
+   * never with `seedPassword`. Versions 0.3.0 and earlier used `seedPassword`
+   * for both roles, so files written by them were keyed with the seed
+   * passphrase -- the empty string for most wallets. A file still encrypted
+   * that way is re-keyed in place the first time it opens. A file that no
+   * known password opens is deleted and rebuilt from the mnemonic, costing
+   * one re-scan -- but only for a wallet with no seed passphrase. With one
+   * set, the passphrase is far and away the likeliest thing to be wrong, and
+   * rebuilding would restore a different wallet over a file that was intact,
+   * so that case throws instead.
+   *
+   * The migration is decided entirely by what the file does, so it is
+   * idempotent and self-healing: an interrupted re-key leaves the file on
+   * its old password for the next attempt.
+   */
   async startWallet(
     mnemonicSeed: string,
     seedPassword: string,
-    storagePath: string
+    storagePath: string,
+    opts: { log?: (message: string) => void } = {}
   ): Promise<WalletDetails> {
-    const files = await this.getWalletFiles()
+    const log = opts.log ?? (() => {})
+    const filePassword = deriveWalletFilePassword(mnemonicSeed)
 
-    let items: string[] = []
-    if ('items' in files) {
-      items = files.items
+    const openWith = async (password: string): Promise<WalletDetails> => {
+      const wallet = this.expectWallet(
+        this.handleRpcResponse(await this.open(storagePath, password))
+      )
+      if (wallet.recovered) {
+        // The keys decrypted but the body did not, so the native layer wiped
+        // the history and will re-scan. It is also the signature of a file
+        // left half-encrypted by a botched re-key.
+        log('Zano wallet file was recovered; its history will re-sync')
+      }
+      return wallet
     }
 
-    if (!items.includes(storagePath)) {
-      const response = await this.restore(
-        mnemonicSeed,
-        storagePath,
-        seedPassword,
-        seedPassword
+    const restoreFresh = async (): Promise<WalletDetails> =>
+      this.expectWallet(
+        this.handleRpcResponse(
+          await this.restore(
+            mnemonicSeed,
+            storagePath,
+            filePassword,
+            seedPassword
+          )
+        )
       )
 
-      const result = this.handleRpcResponse(response)
-      return result
-    } else {
-      const response = await this.open(storagePath, seedPassword)
+    const rebuild = async (): Promise<WalletDetails> => {
+      await this.deleteWallet(storagePath)
 
-      const result = this.handleRpcResponse(response)
-      return result
+      // The native delete reports OK whether or not it removed anything, so
+      // confirm before restoring. `restore` onto a file that survived answers
+      // ALREADY_EXISTS, which callers recover from by adopting the open
+      // wallet -- and nothing is open here, so they would find none and
+      // rebuild again on every start. Failing here says what went wrong once.
+      // Ask the filesystem rather than the listing: `getWalletFiles` can
+      // answer without an `items` field, and treating that as proof the file
+      // is gone would restore onto a survivor anyway.
+      if (await this.isWalletExist(storagePath)) {
+        throw new Error('Could not delete the Zano wallet file')
+      }
+
+      return await restoreFresh()
     }
+
+    const files = await this.getWalletFiles()
+    const exists = 'items' in files && files.items.includes(storagePath)
+    if (!exists) {
+      return await restoreFresh()
+    }
+
+    try {
+      return await openWith(filePassword)
+    } catch (error: unknown) {
+      // Anything other than a bad password -- including ALREADY_EXISTS,
+      // which callers recover from by adopting the open wallet -- is not
+      // ours to handle.
+      if (!isWrongPassword(error)) throw error
+    }
+
+    // Files written by 0.3.0 and earlier are keyed with the seed passphrase,
+    // which was '' unless the user set one:
+    const legacyPasswords = seedPassword === '' ? [''] : [seedPassword, '']
+
+    for (const legacy of legacyPasswords) {
+      if (legacy === filePassword) continue
+
+      let wallet: WalletDetails
+      try {
+        wallet = await openWith(legacy)
+      } catch (error: unknown) {
+        if (!isWrongPassword(error)) throw error
+        continue
+      }
+
+      // Whether we still hold this wallet open. Rebuilding deletes the file,
+      // so it is only safe once nothing has it open.
+      let held = true
+      try {
+        // `reset_wallet_password` only assigns the in-memory password. The
+        // file is re-encrypted when the wallet next stores, which closing it
+        // does.
+        //
+        // Do not replace this with a `store(path, password)` call: the SDK
+        // encrypts the keys blob with the argument but the body with the
+        // in-memory password, producing a file that opens, fails to
+        // deserialize its body, wipes the history and silently re-scans.
+        const resetCode = await this.resetWalletPassword(
+          wallet.wallet_id,
+          filePassword
+        )
+        if (resetCode !== 'OK') {
+          throw new Error(`resetWalletPassword returned ${resetCode}`)
+        }
+
+        // `closeWallet`, not `stopWallet`: the async 'close' path discards
+        // the native return code and always reports OK, so it cannot tell
+        // us whether the file was actually written.
+        const { response } = await this.closeWallet(wallet.wallet_id)
+        if (response !== 'OK') {
+          throw new Error(`closeWallet returned ${response}`)
+        }
+        held = false
+
+        // Only believe the migration once the file really opens with the
+        // new password:
+        const migrated = await openWith(filePassword)
+        log('Zano wallet file re-keyed with a derived password')
+        return migrated
+      } catch (error: unknown) {
+        // Someone else has this wallet open, and callers recover from that by
+        // adopting it, exactly as the first probe allows. Deleting the file
+        // would pull it out from under that handle.
+        if (isAlreadyExists(error)) throw error
+
+        // Past the close, the file on disk really is re-keyed -- both
+        // `resetWalletPassword` and `closeWallet` reported OK. Only a wrong
+        // password on the confirming open says otherwise. Anything else is a
+        // failure to confirm a file that is almost certainly correct, and
+        // rebuilding would spend a full rescan replacing it with its twin.
+        if (!held && !isWrongPassword(error)) throw error
+
+        log(`Zano wallet file re-key failed: ${String(error)}`)
+
+        if (held) {
+          try {
+            const { response } = await this.closeWallet(wallet.wallet_id)
+            if (response !== 'OK') {
+              throw new Error(`closeWallet returned ${response}`)
+            }
+          } catch (closeError: unknown) {
+            // We cannot delete a file this process still has open. Leaving it
+            // alone is safe: it is still keyed with the legacy password, so
+            // the next start simply tries the migration again.
+            log(
+              `Zano wallet file re-key could not release the wallet, leaving the file alone: ${String(
+                closeError
+              )}`
+            )
+            throw error
+          }
+        }
+
+        // Rebuilding restores from the mnemonic with `seedPassword`, which
+        // reproduces this wallet only if that is the passphrase the file was
+        // written with. Opening it with `seedPassword` proves exactly that;
+        // opening it with '' does not, and 0.3.0 wrote '' for wallets it
+        // believed had no passphrase. When the two disagree, the file we just
+        // opened is the user's wallet and the rebuild would not be, so leave
+        // it alone -- the same rule the post-loop path applies.
+        if (legacy !== seedPassword) {
+          throw new Error(
+            'The Zano wallet file was written without this seed passphrase, so it cannot be rebuilt with one'
+          )
+        }
+
+        log('Rebuilding the Zano wallet file')
+        return await rebuild()
+      }
+    }
+
+    // Every password this package has ever written has now been tried: the
+    // derived one, the seed passphrase, and the empty string 0.3.0 used for
+    // wallets without one. Reaching here with a passphrase set means it does
+    // not belong to this file, and rebuilding would restore from the mnemonic
+    // with that same passphrase -- a different wallet, written over a file
+    // that was fine. Zano's checksum rejects most wrong passphrases outright,
+    // so the usual outcome would be a deleted file and a failed restore; the
+    // rest of the time it is a wallet whose keys are not the user's, opening
+    // cleanly ever after because the file password comes from the mnemonic
+    // alone and so cannot tell the two apart.
+    if (seedPassword !== '') {
+      throw new Error(
+        'The Zano wallet file does not open with this seed passphrase'
+      )
+    }
+
+    log('Zano wallet file opens with no known password, rebuilding it')
+    return await rebuild()
   }
 
   async stopWallet(walletId: number): Promise<string> {
@@ -500,14 +695,37 @@ export class CppBridge {
   // Utils
   // -----------------------------------------------------------------------------
 
-  private handleRpcResponse<T>(json: JsonRpc<T>): T {
-    if ('result' in json) {
-      return json.result
-    } else if ('error' in json) {
-      throw new Error(`${json.error.code} ${json.error.message}`)
-    } else {
-      throw new Error('Unknown error')
+  /**
+   * Validates that a wallet payload really carries a wallet handle.
+   * Guards the paths that must not mistake a degenerate payload for an
+   * open wallet.
+   */
+  private expectWallet(wallet: WalletDetails): WalletDetails {
+    if (typeof wallet.wallet_id !== 'number') {
+      throw new ZanoError('INTERNAL_ERROR', 'Response carried no wallet_id')
     }
+    return wallet
+  }
+
+  private handleRpcResponse<T>(json: JsonRpc<T>): T {
+    if ('error' in json) {
+      throw new ZanoError(String(json.error.code), json.error.message)
+    }
+    if (!('result' in json) || json.result == null) {
+      throw new ZanoError('INTERNAL_ERROR', 'Unknown error')
+    }
+
+    // The native layer's catch-all macros report failure as a
+    // success-shaped payload: `{result: {return_code: "INTERNAL_ERROR ..."}}`
+    // from PLAIN_WALLET_CATCH, or `"UNINITIALIZED"` when `init` has not run.
+    // Passing those through would hand callers a result whose real fields
+    // are all undefined.
+    const returnCode = (json.result as { return_code?: unknown }).return_code
+    if (typeof returnCode === 'string' && returnCode !== 'OK') {
+      throw new ZanoError(returnCode)
+    }
+
+    return json.result
   }
 
   private async _asyncCallWithRetry<T>(

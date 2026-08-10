@@ -15,6 +15,26 @@ interface JsonRpcResponseError extends JsonRpcResponseBase {
 }
 export type JsonRpc<T> = JsonRpcResponseSuccess<T> | JsonRpcResponseError
 
+/**
+ * An error from the native Zano library, carrying its API return code.
+ *
+ * The message keeps the exact `<code> <detail>` shape this library has
+ * always thrown, so callers matching on `error.message` substrings keep
+ * working.
+ */
+export class ZanoError extends Error {
+  /** The bare return code, with any packed detail stripped. */
+  readonly code: string
+
+  constructor(rawCode: string, detail: string = '') {
+    super(`${rawCode} ${detail}`)
+    this.name = 'ZanoError'
+    // The native layer packs detail into the code itself, as `FAIL:<what>`
+    // or `INTERNAL_ERROR, DESCRIPTION: <what>`:
+    this.code = rawCode.split(/[\s,:]/)[0]
+  }
+}
+
 export interface ReturnCode {
   return_code: string
 }
