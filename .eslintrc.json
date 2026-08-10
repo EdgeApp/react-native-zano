@@ -9,7 +9,7 @@
     }
   ],
   "parserOptions": {
-    "project": "tsconfig.json"
+    "project": "tsconfig.eslint.json"
   },
   "plugins": [
     "simple-import-sort"
