@@ -77,6 +77,37 @@ export async function loudExec(
 }
 
 /**
+ * Runs a command and returns its stdout, without going through a shell.
+ */
+export async function captureExec(
+  command: string,
+  args: string[],
+  opts: { cwd?: string } = {}
+): Promise<string> {
+  const { cwd = tmpPath } = opts
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: ['ignore', 'pipe', 'inherit']
+    })
+
+    let out = ''
+    child.stdout.on('data', chunk => {
+      out += String(chunk)
+    })
+
+    child.on('error', reject)
+    // `close` rather than `exit`: the process can exit while stdout still has
+    // buffered data, which would truncate the output we are here to collect.
+    // `close` waits for the stdio streams too.
+    child.on('close', code => {
+      if (code === 0) resolve(out.replace(/\n$/, ''))
+      else reject(new Error(`${command} exited with code ${String(code)}`))
+    })
+  })
+}
+
+/**
  * Runs a command and returns its results.
  */
 export async function quietExec(
