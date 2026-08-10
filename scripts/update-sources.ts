@@ -63,7 +63,10 @@ async function downloadSources(): Promise<void> {
   await getRepo(
     'zano_native_lib',
     'https://github.com/hyle-team/zano_native_lib.git',
-    '91085c0ebd95fcdae3327071a9e5f5b615d7da3d'
+    '91085c0ebd95fcdae3327071a9e5f5b615d7da3d',
+    // The repo keeps prebuilt archives for every platform in Git LFS,
+    // but we only link against these two:
+    { lfsIncludes: ['_install_ios/**', '_libs_android/**'] }
   )
   await getRepo(
     'Boost-for-Android',
@@ -448,4 +451,10 @@ async function packageIosZano(): Promise<void> {
   ])
 }
 
-main().catch(error => console.log(error))
+main().catch(error => {
+  // This is the `prepack` script, so a swallowed failure means `npm publish`
+  // reports success against whatever stale `ios/ZanoModule.xcframework` was
+  // lying around, and no check this script makes can ever fail a build.
+  console.error(error)
+  process.exitCode = 1
+})
