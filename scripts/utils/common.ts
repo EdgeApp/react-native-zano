@@ -98,10 +98,15 @@ export async function getRepo(
     )
   }
 
-  // Checkout submodules:
-  await loudExec('git', ['submodule', 'update', '--init', '--recursive'], {
-    cwd: path
-  })
+  // Checkout submodules. `--force` because `update-sources` patches
+  // `RIPEMD160.h`, which lives inside the Zano submodule: without it the
+  // second run of this script aborts on "local changes would be overwritten"
+  // and the build is not repeatable, which `prepack` needs it to be.
+  await loudExec(
+    'git',
+    ['submodule', 'update', '--init', '--recursive', '--force'],
+    { cwd: path }
+  )
 }
 
 /**
