@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.0 (2026-08-14)
+
 - added: `startWallet` accepts an optional `log` callback that reports wallet-file recovery and migration events.
 - added: A `ZanoError` class carrying the native API return code as `error.code`. Thrown error messages keep their existing `<code> <message>` shape.
 - added: A unit-test suite (`npm test`) that runs the bridge against a fake native module.
