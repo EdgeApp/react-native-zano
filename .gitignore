@@ -1,8 +1,11 @@
+/android/.gradle/
+/android/build/
 /android/src/main/jniLibs/
 /lib/
 /node_modules/
 /src/index.js.flow
 /tmp/
+/*.tgz
 
 # iOS stuff:
 .DS_Store
