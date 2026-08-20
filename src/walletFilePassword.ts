@@ -1,3 +1,4 @@
+import { base16 } from 'rfc4648'
 import nacl from 'tweetnacl'
 
 /**
@@ -17,17 +18,15 @@ const DOMAIN = 'react-native-zano:file-password:v1'
  */
 const PASSWORD_BYTES = 16
 
-const HEX = '0123456789abcdef'
-
-function toHex(data: Uint8Array): string {
-  let out = ''
-  for (let i = 0; i < data.length; ++i) {
-    out += HEX[data[i] >> 4] + HEX[data[i] & 0x0f]
-  }
-  return out
-}
-
-/** Encodes a string as UTF-8 without relying on Buffer or TextEncoder. */
+/**
+ * Encodes a string as UTF-8 without relying on Buffer or TextEncoder.
+ *
+ * This module runs both on the React Native JS thread and inside
+ * edge-currency-accountbased's plugin WebView, and `TextEncoder` is not
+ * guaranteed in every engine and polyfill combination those present. The
+ * derivation must produce identical bytes everywhere, forever, so it does
+ * not depend on a host global that may be absent.
+ */
 function utf8Bytes(text: string): Uint8Array {
   const out: number[] = []
   for (let i = 0; i < text.length; ++i) {
@@ -74,5 +73,5 @@ function utf8Bytes(text: string): Uint8Array {
 export function deriveWalletFilePassword(mnemonic: string): string {
   const normalized = mnemonic.trim().replace(/\s+/g, ' ')
   const digest = nacl.hash(utf8Bytes(`${DOMAIN}|${normalized}`))
-  return toHex(digest.subarray(0, PASSWORD_BYTES))
+  return base16.stringify(digest.subarray(0, PASSWORD_BYTES)).toLowerCase()
 }
