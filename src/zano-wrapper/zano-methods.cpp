@@ -1,5 +1,5 @@
-#import <stdio.h>
-#import <plain_wallet_api.h>
+#include <stdio.h>
+#include <plain_wallet_api.h>
 
 #include "zano-methods.hpp"
 

@@ -3,6 +3,7 @@
 /android/src/main/jniLibs/
 /lib/
 /node_modules/
+/prebuilds/
 /src/index.js.flow
 /tmp/
 /*.tgz
