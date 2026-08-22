@@ -198,6 +198,8 @@ The fix sweeps the mempool with one request at offset zero per poll, then pages 
       }
 ```
 
+Announce the transfers the sweep surfaces. A swept transfer enters the store at block height zero, and `CurrencyEngine.isTransactionNew` compares a transaction's checkpoint against the wallet's last seen one, where the checkpoint is the block height: zero never advances past the checkpoint of a synced wallet, so the arrival reads as already seen and reaches the core as a change rather than a new transaction. The confirmation a few minutes later takes `addTransaction`'s update path, which is a change too, so the GUI's receive dropdown never fires for a Zano transfer at all. `ZanoEngine` now overrides `isTransactionNew` the way `MoneroEngine` and `ZcashEngine` do, treating an incoming unconfirmed transaction as new once the wallet has a seen checkpoint. The multi-device caveat those engines carry applies here too: a second device syncing the same account keeps its own checkpoint and can announce the same transfer again.
+
 ## 7. Testing
 
 1. Unit, react-native-zano: 34 mocha cases pass, including new coverage that the migration sequence is `configure` first and `run_wallet` last, and that every terminal `startWallet` path leaves exactly the returned wallet running (`test/startWallet.test.ts`, fake module tracks `runningWallets`).
@@ -210,6 +212,8 @@ The fix sweeps the mempool with one request at offset zero per poll, then pages 
 8. In-app end-to-end, iOS simulator (2026-08-21): with this branch, edge-currency-accountbased#1090 and edge-core-js#738 all linked into the gui, a 0.063 ZANO send between two wallets of the `edge-funds` account was driven to its success scene. The receiving wallet showed the incoming transfer while it was still unconfirmed ("Pending"), then moved through its confirmation count to confirmed; the sending wallet moved from pending through "9 of 10 Confirmations" to confirmed, and both balances settled at the expected values. That is the phase-5 report, reproduced as working. Proof frames are attached to edge-currency-accountbased#1090.
 9. A/B against the published packages on the same sim (2026-08-21): before the fixed packages were linked, the Send scene could not accept a recipient address at all. `ZanoTools.isValidAddress` calls `getAddressInfo`, which sits on the same serial `callZano` dispatch as the refresh worker, and it never resolved across three launches and more than fifteen minutes while a Zano wallet was catching up. With the fixed packages linked, the same drive resolved immediately. The queue starvation was therefore not only a slowdown: it made address entry and sending unusable.
 10. Not covered: the resync path's gate reset (change 2 of [section 6](#6-detailed-design-edge-currency-accountbased)) was verified by types and review only; an in-app resync drive costs a full rescan window and was skipped.
+11. Unit, receive notification (2026-08-22): a fourth case in `ZanoEngineQueryTransactions.test.ts` asserts that a swept mempool receive reaches the core with `isNew` true. Against the code before the override the case fails; with it the accb suite is 530 passing.
+12. In-app notification drive, iOS simulator (2026-08-22): instrumented `AccountCallbackManager` and `ReceiveDropdown` in the gui worktree (local only, reverted) to trace every transaction event. Before the override, two 0.063 ZANO transfers between two `edge-funds` Zano wallets reached the receiving wallet as `transactionsChanged` only, and no dropdown appeared; a 2-second screenshot loop over the whole arrival window caught none. After the override, a third transfer of 0.0634 ZANO produced `newTransactions` on the receiving wallet 21 seconds after broadcast, while the transfer was still unconfirmed, and the "0.0634 ZANO Received" dropdown rendered. Proof frame attached to edge-currency-accountbased#1090.
 
 ## 8. Phase history
 
@@ -275,6 +279,14 @@ The confirmation phase 5 owed is now done, on the iOS simulator, and both walls 
 - A third trap cost most of the phase: every install-bearing step in the gui (the cheese pin install, then `ios-rn-build`'s own install) reverts linked dep packages back to their published versions. The first ninety minutes of drives ran against published `react-native-zano@0.4.0` and published accountbased, which is exactly why the Send scene appeared wedged. Linking with `updot` and rebuilding with `--skip-install`, then verifying the native symbol in the app binary and the accountbased webview bundle hash against the worktree build, is what made the drive meaningful.
 
 With the fixed packages actually in the app, the send completed and both wallets behaved as designed (see [Testing](#7-testing) items 8 and 9). Phase 5's "in-app confirmation is still owed" is closed.
+
+### Phase 7: the receive notification (2026-08-22)
+
+The operator asked for the notification itself to be verified, and clarified that it means the in-app Airship dropdown rather than an OS push. Driving it found the mempool sweep half-finished.
+
+- The dropdown path is `wallet.on('newTransactions')` in the gui's `AccountCallbackManager`, which filters to receives and dispatches `showReceiveDropdown`. It never ran for a Zano receive: the engine reported every swept transfer as a change, for the checkpoint reason in [section 6](#6-detailed-design-edge-currency-accountbased).
+- Two transfers driven on the sim before the fix reached the receiving wallet as `transactionsChanged` and raised nothing. The same transfers announced themselves correctly after an app relaunch, since a wallet re-reading its file has no checkpoint above them, which is why the gap survived phase 6: the phase-6 drive watched the transaction row and the balance, both of which update on a change event.
+- Shipped: the `isTransactionNew` override in `ZanoEngine`, mirroring the Monero and Zcash engines, plus a regression case. Verified in-app on the third transfer, unconfirmed, 21 seconds after broadcast.
 
 ## 9. Decisions
 
