@@ -19,6 +19,21 @@ const makeState = (file?: FakeWalletFile): FakeState => {
 const makeBridge = (state: FakeState): CppBridge =>
   new CppBridge(makeFakeZanoModule(state))
 
+describe('CppBridge construction', () => {
+  it('refuses a module that reports no document directory', () => {
+    // The iOS module omits `documentDirectory` when the wallet directory
+    // could not be created or excluded from device backups. Constructing a
+    // bridge anyway would concatenate `undefined` into every storage path.
+    const base = makeFakeZanoModule(makeState())
+    for (const documentDirectory of [undefined, '']) {
+      assert.throws(
+        () => new CppBridge({ ...base, documentDirectory }),
+        /no document directory/
+      )
+    }
+  })
+})
+
 describe('startWallet', () => {
   it('creates a missing file with the derived password, not the seed passphrase', async () => {
     const state = makeState()

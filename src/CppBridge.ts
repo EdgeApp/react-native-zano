@@ -38,7 +38,13 @@ export interface NativeZanoModule {
   readonly callZano: (name: string, jsonArguments: string[]) => Promise<string>
 
   readonly methodNames: string[]
-  readonly documentDirectory: string
+
+  /**
+   * Absent when the iOS module could not create the wallet directory or
+   * exclude it from device backups; the `CppBridge` constructor refuses to
+   * run without it.
+   */
+  readonly documentDirectory?: string
 }
 
 function isWrongPassword(error: unknown): boolean {
@@ -51,11 +57,27 @@ function isAlreadyExists(error: unknown): boolean {
 
 export class CppBridge {
   private readonly module: NativeZanoModule
+  private readonly documentDirectory: string
   // Whether `configurePostponedRun` has succeeded. The native flag it sets
   // is process-wide and sticky, so one success covers every later call:
   private postponedRunConfigured: boolean = false
 
   constructor(zanoModule: NativeZanoModule) {
+    // The native side omits `documentDirectory` when it could not create the
+    // wallet directory or exclude it from device backups. That directory
+    // holds the seed and spend keys, so a missing value must stop the bridge
+    // here rather than let every path below concatenate `undefined` into a
+    // storage path the SDK would happily create somewhere unprotected.
+    if (
+      zanoModule.documentDirectory == null ||
+      zanoModule.documentDirectory === ''
+    ) {
+      throw new ZanoError(
+        'INTERNAL_ERROR',
+        'Zano native module reported no document directory'
+      )
+    }
+    this.documentDirectory = zanoModule.documentDirectory
     this.module = zanoModule
   }
 
@@ -69,7 +91,7 @@ export class CppBridge {
   ): Promise<JsonRpc<ReturnCode>> {
     const response = await this.module.callZano('init', [
       rpcAddress,
-      this.module.documentDirectory,
+      this.documentDirectory,
       logLevel.toFixed()
     ])
     return JSON.parse(response)
@@ -83,7 +105,7 @@ export class CppBridge {
     const response = await this.module.callZano('initWithIpPort', [
       ip,
       port,
-      this.module.documentDirectory,
+      this.documentDirectory,
       logLevel.toFixed()
     ])
     return JSON.parse(response)
@@ -314,7 +336,7 @@ export class CppBridge {
 
   async isWalletExist(path: string): Promise<boolean> {
     const response = await this.module.callZano('isWalletExist', [
-      this.module.documentDirectory + '/wallets/' + path
+      this.documentDirectory + '/wallets/' + path
     ])
     return response === '1'
   }
