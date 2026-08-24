@@ -37,18 +37,24 @@ describe('startWallet', () => {
       ),
       `restore call not found in: ${state.calls.join('\n')}`
     )
+    // The restore opens postponed; the returned wallet must be running:
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 
   it('opens a file already on the derived password without touching it', async () => {
     const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
     const bridge = makeBridge(state)
 
-    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    const wallet = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
 
     const joined = state.calls.join('\n')
     assert.ok(!joined.includes('resetWalletPassword'))
     assert.ok(!joined.includes('restore'))
     assert.ok(!joined.includes('deleteWallet'))
+    // The postponed-run contract holds on the plain-open path too: dropping
+    // `started()` here would otherwise leave the wallet open but not syncing.
+    assert.ok(joined.includes('syncCall(configure,'))
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 
   it('re-keys a file encrypted with the empty string', async () => {
@@ -59,36 +65,104 @@ describe('startWallet', () => {
 
     assert.equal(typeof wallet.wallet_id, 'number')
     assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
-    // The exact sequence: probe with the new password, open legacy, re-key
-    // in memory, close to persist, then verify by reopening:
+    // The exact sequence: postpone the refresh worker so no open below can
+    // start a scan that would block the re-key, probe with the new password,
+    // open legacy, re-key in memory, close to persist, verify by reopening,
+    // and only then start the worker:
     assert.deepEqual(state.calls, [
+      'syncCall(configure,0,{"postponed_run_wallet":true})',
       'getWalletFiles()',
       `open(${STORAGE_PATH},${DERIVED})`,
       `open(${STORAGE_PATH},)`,
       `resetWalletPassword(1,${DERIVED})`,
       'closeWallet(1)',
-      `open(${STORAGE_PATH},${DERIVED})`
+      `open(${STORAGE_PATH},${DERIVED})`,
+      'syncCall(run_wallet,2,)'
     ])
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 
   it('re-keys a file encrypted with a real seed passphrase', async () => {
     const state = makeState({ filePassword: 'hunter2', mnemonic: MNEMONIC })
     const bridge = makeBridge(state)
 
-    await bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH)
+    const wallet = await bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH)
 
     assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 
   it('is idempotent across launches', async () => {
     const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
     const bridge = makeBridge(state)
 
-    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    const first = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
     state.calls.length = 0
-    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    // A new launch is a new process: native loses its open-wallet table and
+    // its running workers, so the second start opens the file fresh rather
+    // than re-using a handle.
+    state.openWallets?.clear()
+    state.runningWallets?.clear()
+    const second = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
 
     assert.ok(!state.calls.join('\n').includes('resetWalletPassword'))
+    assert.equal(typeof second.wallet_id, 'number')
+    assert.notEqual(first.wallet_id, second.wallet_id)
+    assert.deepEqual([...(state.runningWallets ?? [])], [second.wallet_id])
+  })
+
+  it('configures postponed run once per bridge', async () => {
+    const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
+    const bridge = makeBridge(state)
+
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    // The same process starts another wallet: the native flag is sticky, so
+    // the bridge must not pay a second configure round trip.
+    state.openWallets?.clear()
+    state.runningWallets?.clear()
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    const configures = state.calls.filter(call =>
+      call.startsWith('syncCall(configure,')
+    )
+    assert.equal(configures.length, 1, state.calls.join('\n'))
+  })
+
+  it('retries configure after a failure, and reports it readably', async () => {
+    const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
+    // The native failure path answers with a bare return-code string, not
+    // JSON; the bridge must report it, not throw an opaque SyntaxError:
+    state.configureResult = 'UNINITIALIZED'
+    const bridge = makeBridge(state)
+
+    await assert.rejects(
+      bridge.startWallet(MNEMONIC, '', STORAGE_PATH),
+      /Zano configure returned UNINITIALIZED/
+    )
+
+    // A failure must not latch the short-circuit: the next start retries.
+    delete state.configureResult
+    const wallet = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
+    const configures = state.calls.filter(call =>
+      call.startsWith('syncCall(configure,')
+    )
+    assert.equal(configures.length, 2, state.calls.join('\n'))
+  })
+
+  it('refuses a second start while the first is still open', async () => {
+    const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
+    const bridge = makeBridge(state)
+
+    const first = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    state.calls.length = 0
+
+    await assert.rejects(
+      bridge.startWallet(MNEMONIC, '', STORAGE_PATH),
+      /ALREADY_EXISTS/
+    )
+    assert.ok(!state.calls.join('\n').includes('deleteWallet'))
+    assert.deepEqual([...(state.runningWallets ?? [])], [first.wallet_id])
   })
 
   it('rebuilds the file when resetWalletPassword does not report OK', async () => {
@@ -103,6 +177,8 @@ describe('startWallet', () => {
     assert.equal(typeof wallet.wallet_id, 'number')
     assert.ok(state.calls.join('\n').includes('deleteWallet'))
     assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+    // Only the rebuilt wallet syncs; the discarded legacy open never ran:
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 
   it('leaves the file alone when it cannot release the wallet', async () => {
@@ -157,10 +233,11 @@ describe('startWallet', () => {
     ]
     const bridge = makeBridge(state)
 
-    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    const wallet = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
 
     assert.ok(state.calls.join('\n').includes('deleteWallet'))
     assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 
   it('fails loudly when the delete leaves the file behind', async () => {
@@ -221,10 +298,11 @@ describe('startWallet', () => {
     const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
     const bridge = makeBridge(state)
 
-    await bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH)
+    const wallet = await bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH)
 
     assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
     assert.ok(!state.calls.join('\n').includes('deleteWallet'))
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
     // Both candidates were tried, in order:
     const opens = state.calls.filter(call => call.startsWith('open('))
     assert.deepEqual(opens, [
@@ -260,10 +338,11 @@ describe('startWallet', () => {
     state.resetResult = '{"error":{"code":"INTERNAL_ERROR"}}'
     const bridge = makeBridge(state)
 
-    await bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH)
+    const wallet = await bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH)
 
     assert.ok(state.calls.join('\n').includes('deleteWallet'))
     assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 
   it('throws rather than rebuilding when the passphrase is wrong', async () => {
@@ -289,10 +368,13 @@ describe('startWallet', () => {
     })
     const bridge = makeBridge(state)
 
-    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    const wallet = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
 
     assert.ok(state.calls.join('\n').includes('deleteWallet'))
     assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+    // The rebuilt wallet is the one that must sync -- dropping `started()`
+    // on this path previously survived the whole suite:
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 
   it('rethrows ALREADY_EXISTS with the historical message shape', async () => {
@@ -337,11 +419,12 @@ describe('startWallet', () => {
     const bridge = makeBridge(state)
     const logged: string[] = []
 
-    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH, {
+    const wallet = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH, {
       log: message => logged.push(message)
     })
 
     assert.ok(logged.some(line => line.includes('re-keyed')))
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
   })
 })
 
@@ -358,5 +441,39 @@ describe('generateSeedPhrase', () => {
 
     assert.equal(typeof wallet.seed, 'string')
     assert.equal(state.files.size, 0)
+  })
+
+  it('postpones the refresh worker before generating', async () => {
+    const state = makeState()
+    const bridge = makeBridge(state)
+
+    await bridge.generateSeedPhrase('http://example.invalid', STORAGE_PATH, '')
+
+    // `generate` auto-starts the refresh worker unless postponed-run is
+    // configured first, and the `closeWallet` below waits on the mutex that
+    // worker holds, on the shared native-module queue.
+    const configureIndex = state.calls.findIndex(call =>
+      call.startsWith('syncCall(configure,')
+    )
+    const generateIndex = state.calls.findIndex(call =>
+      call.startsWith('generate(')
+    )
+    assert.notEqual(configureIndex, -1, state.calls.join('\n'))
+    assert.ok(
+      configureIndex < generateIndex,
+      `configure must precede generate: ${state.calls.join('\n')}`
+    )
+  })
+
+  it('keeps the file when the close fails, rather than deleting it open', async () => {
+    const state = makeState()
+    state.closeResult = 'BUSY'
+    const bridge = makeBridge(state)
+
+    await assert.rejects(
+      bridge.generateSeedPhrase('http://example.invalid', STORAGE_PATH, ''),
+      /BUSY/
+    )
+    assert.ok(!state.calls.join('\n').includes('deleteWallet'))
   })
 })

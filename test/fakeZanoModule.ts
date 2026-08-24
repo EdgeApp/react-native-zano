@@ -23,10 +23,26 @@ export interface FakeState {
   /** Forces `resetWalletPassword` to report this raw string. */
   resetResult?: string
   /**
+   * Forces `configure` to answer with this raw string, modeling the native
+   * failure path that reports a bare return code instead of JSON.
+   */
+  configureResult?: string
+  /**
    * Makes `deleteWallet` leave the file in place while still reporting OK,
    * which is what the native layer does when the delete fails.
    */
   deleteFails?: boolean
+  /**
+   * Filled in by the fake: wallet ids whose refresh worker was started via
+   * `run_wallet`, so tests can assert which wallets actually sync.
+   */
+  runningWallets?: Set<number>
+  /**
+   * Filled in by the fake: storage paths of wallets currently open, keyed by
+   * wallet id. Clearing it models a fresh process, since the native library
+   * loses its open-wallet table when the app dies.
+   */
+  openWallets?: Map<number, string>
 }
 
 export const FAKE_ADDRESS = 'ZxFakeAddress'
@@ -63,6 +79,18 @@ export function makeFakeZanoModule(state: FakeState): NativeZanoModule {
   const open = new Map<number, { storagePath: string; password: string }>()
   let nextId = 1
 
+  // Wallet ids whose refresh worker has been started with `run_wallet`.
+  // Mirrors the native `postponed_run_wallet` mode the bridge configures:
+  // opening no longer runs the wallet, so a wallet that should sync must
+  // appear here.
+  const running = new Set<number>()
+  state.runningWallets = running
+
+  // Exposed so a test can model a new process (native loses this table when
+  // the app dies) and assert which paths are still held open.
+  const openPaths = new Map<number, string>()
+  state.openWallets = openPaths
+
   const methods: {
     [name: string]: (args: string[]) => string
   } = {
@@ -78,10 +106,17 @@ export function makeFakeZanoModule(state: FakeState): NativeZanoModule {
       if (queued != null) return queued
       const file = state.files.get(storagePath)
       if (file == null) return rpcError('FILE_NOT_FOUND')
+      // Native refuses a second open of a file this process already holds.
+      // Driven off the exposed table so a test can clear it to model the
+      // process dying, which is what a new launch really is.
+      for (const path of openPaths.values()) {
+        if (path === storagePath) return rpcError('ALREADY_EXISTS')
+      }
       if (file.filePassword !== password) return rpcError('WRONG_PASSWORD')
 
       const walletId = nextId++
       open.set(walletId, { storagePath, password })
+      openPaths.set(walletId, storagePath)
       return walletResult(walletId, file)
     },
 
@@ -92,6 +127,7 @@ export function makeFakeZanoModule(state: FakeState): NativeZanoModule {
 
       const walletId = nextId++
       open.set(walletId, { storagePath, password: filePassword })
+      openPaths.set(walletId, storagePath)
       return walletResult(walletId, file)
     },
 
@@ -105,6 +141,7 @@ export function makeFakeZanoModule(state: FakeState): NativeZanoModule {
 
       const walletId = nextId++
       open.set(walletId, { storagePath, password })
+      openPaths.set(walletId, storagePath)
       return walletResult(walletId, file)
     },
 
@@ -128,6 +165,8 @@ export function makeFakeZanoModule(state: FakeState): NativeZanoModule {
       const file = state.files.get(entry.storagePath)
       if (file != null) file.filePassword = entry.password
       open.delete(Number(walletIdText))
+      openPaths.delete(Number(walletIdText))
+      running.delete(Number(walletIdText))
       return JSON.stringify({ response: 'OK' })
     },
 
@@ -141,6 +180,25 @@ export function makeFakeZanoModule(state: FakeState): NativeZanoModule {
       // The bridge prefixes the documents directory and `wallets/`:
       const storagePath = fullPath.replace(/^.*\/wallets\//, '')
       return state.files.has(storagePath) ? '1' : '0'
+    },
+
+    syncCall: ([methodName, instanceIdText]) => {
+      if (methodName === 'configure') {
+        if (state.configureResult != null) return state.configureResult
+        // The bridge only ever posts `postponed_run_wallet: true`, which this
+        // fake's `open`/`restore`/`generate` already model (nothing runs
+        // until `run_wallet`).
+        return JSON.stringify({ status: 'OK' })
+      }
+      if (methodName === 'run_wallet') {
+        const walletId = Number(instanceIdText)
+        if (!open.has(walletId)) {
+          return JSON.stringify({ error_code: 'WALLET_WRONG_ID' })
+        }
+        running.add(walletId)
+        return JSON.stringify({ error_code: 'OK' })
+      }
+      throw new Error(`No fake for syncCall method ${methodName}`)
     }
   }
 
