@@ -51,6 +51,9 @@ function isAlreadyExists(error: unknown): boolean {
 
 export class CppBridge {
   private readonly module: NativeZanoModule
+  // Whether `configurePostponedRun` has succeeded. The native flag it sets
+  // is process-wide and sticky, so one success covers every later call:
+  private postponedRunConfigured: boolean = false
 
   constructor(zanoModule: NativeZanoModule) {
     this.module = zanoModule
@@ -155,11 +158,22 @@ export class CppBridge {
     return JSON.parse(response)
   }
 
+  /**
+   * Raw native open. Note that once `startWallet` or `generateSeedPhrase`
+   * has run, the process-wide postponed-run mode is configured and stays on:
+   * a wallet opened here will not sync until `run_wallet` is issued for it
+   * (via `syncCall`). Prefer `startWallet`.
+   */
   async open(path: string, password: string): Promise<JsonRpc<WalletDetails>> {
     const response = await this.module.callZano('open', [path, password])
     return JSON.parse(response)
   }
 
+  /**
+   * Raw native restore. Subject to the same postponed-run caveat as `open`:
+   * under postponed mode the restored wallet will not sync until
+   * `run_wallet` is issued for it.
+   */
   async restore(
     seed: string,
     path: string,
@@ -175,6 +189,11 @@ export class CppBridge {
     return JSON.parse(response)
   }
 
+  /**
+   * Raw native generate. Subject to the same postponed-run caveat as `open`:
+   * under postponed mode the generated wallet will not sync until
+   * `run_wallet` is issued for it.
+   */
   async generate(
     path: string,
     password: string
@@ -236,6 +255,61 @@ export class CppBridge {
       instanceId.toFixed(),
       params
     ])
+  }
+
+  /**
+   * Tells the native library not to start a wallet's refresh worker as part
+   * of `open`/`restore`/`generate`; `runWallet` starts it explicitly. The
+   * flag is process-wide and sticky, so every open made after this call must
+   * be followed by `runWallet` once the wallet should sync -- and one
+   * success is enough, so this short-circuits instead of paying a native
+   * round trip per wallet start. Requires `init` to have run.
+   */
+  private async configurePostponedRun(): Promise<void> {
+    if (this.postponedRunConfigured) return
+    const response = await this.syncCall(
+      'configure',
+      0,
+      JSON.stringify({ postponed_run_wallet: true })
+    )
+    // Same `syncCall` primitive as `runWallet`, same quirk: one native
+    // failure path answers with a bare return-code string rather than JSON,
+    // so a parse failure is a failure report, not a protocol surprise:
+    let parsed: { status?: string }
+    try {
+      parsed = JSON.parse(response)
+    } catch (error: unknown) {
+      throw new Error(`Zano configure returned ${response}`)
+    }
+    if (parsed.status !== 'OK') {
+      throw new Error(`Zano configure returned ${response}`)
+    }
+    this.postponedRunConfigured = true
+  }
+
+  /**
+   * Starts the refresh worker for an open wallet. Idempotent: the native
+   * side skips the spawn when the worker is already running.
+   *
+   * Public because adopting a wallet is public behavior: `startWallet`
+   * rethrows ALREADY_EXISTS for its caller to recover from, and the wallet
+   * the caller then adopts was opened with the refresh worker postponed, so
+   * it does not sync until this runs.
+   */
+  async runWallet(walletId: number): Promise<void> {
+    const response = await this.syncCall('run_wallet', walletId, '')
+    // One native failure path answers with a bare return-code string rather
+    // than JSON (the postponed main worker failing to start), so a parse
+    // failure is a failure report, not a protocol surprise:
+    let parsed: { error_code?: string }
+    try {
+      parsed = JSON.parse(response)
+    } catch (error: unknown) {
+      throw new Error(`Zano run_wallet returned ${response}`)
+    }
+    if (parsed.error_code !== 'OK') {
+      throw new Error(`Zano run_wallet returned ${response}`)
+    }
   }
 
   async isWalletExist(path: string): Promise<boolean> {
@@ -302,10 +376,25 @@ export class CppBridge {
   ): Promise<WalletDetails> {
     await this.init(rpcAddress, logLevel)
 
+    // Native `generate` auto-starts the wallet's refresh worker unless
+    // postponed-run is configured first, and the worker holds the per-wallet
+    // mutex for the whole of each refresh. The `closeWallet` below takes that
+    // same mutex on React Native's shared native-module queue, so without
+    // this the create-wallet path stalls every native call in the app for as
+    // long as the refresh runs. The flag is process-wide, so this matters
+    // whenever `generateSeedPhrase` is the first call to configure it.
+    await this.configurePostponedRun()
+
     const response = await this.generate(storagePath, seedPassword)
 
     const result = this.expectWallet(this.handleRpcResponse(response))
-    await this.closeWallet(result.wallet_id)
+    const { response: closeResponse } = await this.closeWallet(result.wallet_id)
+    if (closeResponse !== 'OK') {
+      // The file is still open in this process, so deleting it would leave a
+      // dangling handle. Leaving it is safe: `startWallet` re-keys or
+      // rebuilds whatever it finds.
+      throw new Error(`closeWallet returned ${closeResponse}`)
+    }
 
     // `generate` writes a wallet file as a side effect, encrypted with
     // `seedPassword` -- typically the empty string. The caller only wants
@@ -345,6 +434,19 @@ export class CppBridge {
   ): Promise<WalletDetails> {
     const log = opts.log ?? (() => {})
     const filePassword = deriveWalletFilePassword(mnemonicSeed)
+
+    // An auto-run open starts the refresh worker, which takes the per-wallet
+    // lock for the entire first catch-up scan -- minutes for a wallet that is
+    // weeks behind. The migration's `resetWalletPassword` then blocks on that
+    // lock, and since it runs on React Native's shared native-module queue,
+    // every native call in the app queues behind it for the whole scan.
+    // Open without running instead, and start the worker explicitly once the
+    // wallet this method returns is the one that should sync.
+    await this.configurePostponedRun()
+    const started = async (wallet: WalletDetails): Promise<WalletDetails> => {
+      await this.runWallet(wallet.wallet_id)
+      return wallet
+    }
 
     const openWith = async (password: string): Promise<WalletDetails> => {
       const wallet = this.expectWallet(
@@ -392,11 +494,11 @@ export class CppBridge {
     const files = await this.getWalletFiles()
     const exists = 'items' in files && files.items.includes(storagePath)
     if (!exists) {
-      return await restoreFresh()
+      return await started(await restoreFresh())
     }
 
     try {
-      return await openWith(filePassword)
+      return await started(await openWith(filePassword))
     } catch (error: unknown) {
       // Anything other than a bad password -- including ALREADY_EXISTS,
       // which callers recover from by adopting the open wallet -- is not
@@ -450,7 +552,7 @@ export class CppBridge {
 
         // Only believe the migration once the file really opens with the
         // new password:
-        const migrated = await openWith(filePassword)
+        const migrated = await started(await openWith(filePassword))
         log('Zano wallet file re-keyed with a derived password')
         return migrated
       } catch (error: unknown) {
@@ -501,7 +603,7 @@ export class CppBridge {
         }
 
         log('Rebuilding the Zano wallet file')
-        return await rebuild()
+        return await started(await rebuild())
       }
     }
 
@@ -522,7 +624,7 @@ export class CppBridge {
     }
 
     log('Zano wallet file opens with no known password, rebuilding it')
-    return await rebuild()
+    return await started(await rebuild())
   }
 
   async stopWallet(walletId: number): Promise<string> {

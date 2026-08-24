@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- added: `runWallet`, which starts the refresh worker for an open wallet. `startWallet` rethrows `ALREADY_EXISTS` for its caller to adopt the already-open wallet, and an adopted wallet does not sync until it is run, so adopting callers need this without reimplementing the raw `run_wallet` response contract.
+- fixed: `startWallet` no longer freezes the app while a wallet catches up on blocks. Opening a wallet auto-started its refresh worker, which holds the per-wallet lock for the entire first scan, so the 0.4.0 re-key migration's `resetWalletPassword` blocked on that lock for the whole catch-up (minutes to hours) while sitting on React Native's shared native-module queue, and on iOS every native call in the app queued behind it. Wallets now open with the refresh worker postponed, the migration completes in milliseconds, and the worker is started explicitly for the one wallet `startWallet` returns.
+- fixed: Creating a wallet no longer freezes the app. `generateSeedPhrase` opened its temporary wallet without postponing the refresh worker, so the `closeWallet` that follows waited on the per-wallet lock, on the shared native-module queue, for the length of a refresh. A close that does not report OK now fails the call rather than deleting a file this process still holds open.
+
 ## 0.4.0 (2026-08-14)
 
 - added: `startWallet` accepts an optional `log` callback that reports wallet-file recovery and migration events.
