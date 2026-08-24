@@ -752,19 +752,6 @@ export class CppBridge {
   }
 
   async transfer(walletId: number, opts: TransferParams): Promise<string> {
-    // Transaction can only have one payment ID
-    let paymentId = opts.paymentId
-    for (const transfer of opts.transfers) {
-      const addressInfo = await this.getAddressInfo(transfer.recipient)
-      if (!addressInfo.is_integrated) continue
-
-      if (paymentId == null) {
-        paymentId = addressInfo.payment_id
-      } else if (paymentId !== addressInfo.payment_id) {
-        throw new Error('Transaction can only have one payment ID')
-      }
-    }
-
     const params = {
       method: 'transfer',
       params: {
@@ -776,7 +763,15 @@ export class CppBridge {
 
         comment: opts.comment,
         fee: opts.fee,
-        payment_id: opts.paymentId ?? '',
+
+        // Since HF6, payment ids travel inside integrated addresses, one
+        // per destination, and the wallet attaches each embedded id
+        // natively -- a single transaction may pay several integrated
+        // addresses carrying different ids. This request-level field is the
+        // old transaction-wide mechanism, and the node rejects any
+        // non-empty value outright. A caller with a separate payment id
+        // must fold it into an integrated destination address first.
+        payment_id: '',
 
         hide_receiver: true,
         mixin: 15,

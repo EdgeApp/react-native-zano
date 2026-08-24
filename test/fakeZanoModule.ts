@@ -43,6 +43,12 @@ export interface FakeState {
    * loses its open-wallet table when the app dies.
    */
   openWallets?: Map<number, string>
+  /**
+   * Filled in by the fake: the `params` object of every `transfer` request
+   * that reached the wallet RPC, so tests can assert what would have gone
+   * out on the wire.
+   */
+  transferRequests?: any[]
 }
 
 export const FAKE_ADDRESS = 'ZxFakeAddress'
@@ -90,6 +96,14 @@ export function makeFakeZanoModule(state: FakeState): NativeZanoModule {
   // the app dies) and assert which paths are still held open.
   const openPaths = new Map<number, string>()
   state.openWallets = openPaths
+
+  const transferRequests: any[] = []
+  state.transferRequests = transferRequests
+
+  // Results for the async job protocol: `asyncCall` runs the work up front
+  // and parks the payload here; `tryPullResult` delivers it on first pull.
+  const jobResults = new Map<number, object>()
+  let nextJobId = 1
 
   const methods: {
     [name: string]: (args: string[]) => string
@@ -180,6 +194,30 @@ export function makeFakeZanoModule(state: FakeState): NativeZanoModule {
       // The bridge prefixes the documents directory and `wallets/`:
       const storagePath = fullPath.replace(/^.*\/wallets\//, '')
       return state.files.has(storagePath) ? '1' : '0'
+    },
+
+    asyncCall: ([methodName, , params]) => {
+      if (methodName !== 'invoke') {
+        throw new Error(`No fake for asyncCall method ${methodName}`)
+      }
+      const request = JSON.parse(params)
+      if (request.method !== 'transfer') {
+        throw new Error(`No fake for invoke method ${String(request.method)}`)
+      }
+      transferRequests.push(request.params)
+
+      const jobId = nextJobId++
+      jobResults.set(
+        jobId,
+        JSON.parse(ok({ tx_hash: 'FAKE_TX_HASH', tx_size: 1 }))
+      )
+      return JSON.stringify({ job_id: jobId })
+    },
+
+    tryPullResult: ([jobIdText]) => {
+      const result = jobResults.get(Number(jobIdText))
+      if (result == null) return JSON.stringify({ status: 'canceled' })
+      return JSON.stringify({ status: 'delivered', result })
     },
 
     syncCall: ([methodName, instanceIdText]) => {
