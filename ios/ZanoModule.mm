@@ -69,7 +69,7 @@ RCT_REMAP_METHOD(
  * The SDK creates these itself on first use, but only we can set the
  * backup flag, and that requires the directory to already exist.
  */
-static void prepareZanoDirectory(NSURL *parent, NSString *name)
+static BOOL prepareZanoDirectory(NSURL *parent, NSString *name)
 {
   NSURL *url = [parent URLByAppendingPathComponent:name isDirectory:YES];
 
@@ -79,14 +79,17 @@ static void prepareZanoDirectory(NSURL *parent, NSString *name)
         attributes:nil
         error:&error]) {
     RCTLogWarn(@"zano could not create %@: %@", name, error);
-    return;
+    return NO;
   }
 
   if (![url setResourceValue:@YES
         forKey:NSURLIsExcludedFromBackupKey
         error:&error]) {
     RCTLogWarn(@"zano could not exclude %@ from backups: %@", name, error);
+    return NO;
   }
+
+  return YES;
 }
 
 - (NSDictionary *)constantsToExport
@@ -99,23 +102,36 @@ static void prepareZanoDirectory(NSURL *parent, NSString *name)
   }
 
   NSFileManager *fileManager = [NSFileManager defaultManager];
+  NSError *docsError = nil;
   NSURL *docsDir = [fileManager URLForDirectory:NSDocumentDirectory
     inDomain:NSUserDomainMask
     appropriateForURL:nil
     create:YES
-    error:nil];
-  NSString *docsPath = [docsDir path];
+    error:&docsError];
+  if (docsDir == nil) {
+    RCTLogWarn(@"zano could not resolve the documents directory: %@", docsError);
+    return @{ @"methodNames": out };
+  }
 
   // Every directory the SDK derives from the working directory we hand it.
   // `scripts/update-sources.ts` fails the build if this list drifts from the
   // folder names declared in the SDK's `plain_wallet_api.cpp`.
-  prepareZanoDirectory(docsDir, @"wallets");
+  //
+  // `wallets` holds the seed and spend keys, so failing to create it or to
+  // mark it excluded from backups is fatal: withholding
+  // `documentDirectory` stops the bridge in its constructor instead of
+  // letting the SDK write keys somewhere an unencrypted Finder backup would
+  // pick up. `logs` and `app_config` carry no key material.
+  BOOL walletsReady = prepareZanoDirectory(docsDir, @"wallets");
   prepareZanoDirectory(docsDir, @"logs");
   prepareZanoDirectory(docsDir, @"app_config");
+  if (!walletsReady) {
+    return @{ @"methodNames": out };
+  }
 
   return @{
     @"methodNames": out,
-    @"documentDirectory": docsPath
+    @"documentDirectory": [docsDir path]
   };
 }
 
