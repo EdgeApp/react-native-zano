@@ -57,6 +57,7 @@
   },
   "dependencies": {
     "cleaners": "^0.3.17",
+    "rfc4648": "^1.5.4",
     "tweetnacl": "^1.0.3"
   }
 }
