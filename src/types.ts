@@ -43,11 +43,16 @@ export interface WalletFiles {
   items: string[]
 }
 
+/**
+ * The shape `plain_wallet::get_address_info` actually returns. Note that
+ * `payment_id` is a boolean presence flag, not the id itself, and there is
+ * no `is_integrated` field -- the earlier declaration of both was fiction
+ * that no native version ever produced.
+ */
 export interface AddressInfo {
   valid: boolean
   auditable: boolean
-  is_integrated: boolean
-  payment_id?: string
+  payment_id: boolean
   wrap: boolean
 }
 
@@ -270,7 +275,6 @@ export interface TransferParams {
 
   comment?: string
   fee: number
-  paymentId?: string
 }
 
 export interface TransferResponse {
