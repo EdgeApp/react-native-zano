@@ -276,6 +276,16 @@ The combination is lossless: an integrated address is exactly the (address, paym
 
 Receive-side parsing is unchanged, so the memo stays visible for transaction display.
 
+Report the chain tip as the wallet's block height. `getWalletStatus` answers with two height fields that are not in the same units: `current_wallet_height` is the wallet's `get_top_block_height()`, which is `m_local_bc_size - 1` and therefore a block height, while `current_daemon_height` is the daemon's `getinfo` height, which counts blocks and sits one above the tip (`wallets_manager.cpp:1738-1739`; measured live, `getinfo` answered 3831817 while `getlastblockheader` put the tip at 3831816). `syncNetwork` reported `Math.max` of the two raw values, so a synced wallet always claimed one block past the chain, and both confirmation formulas (`CurrencyEngine.updateConfirmations` and the core's `determineConfirmations`, each `walletBlockHeight - txBlockHeight + 1`) read one confirmation too high: a transfer mined in the tip block opened at "2 of 10" and the wallet called it confirmed a block early. The conversion happens once, floored at zero so a disconnected daemon reporting height zero cannot produce a negative block height, and the converted value feeds both the block height and the sync-progress detail.
+
+// src/zano/ZanoEngine.ts
+```ts
+export const daemonHeightToBlockHeight = (daemonHeight: number): number =>
+  Math.max(0, daemonHeight - 1)
+```
+
+This one pre-dates the migration: `master` carries the same `Math.max` of a height and a count, so it is a Zano-wide reporting bug rather than a regression from the work in this document.
+
 ## 7. Testing
 
 1. Unit, react-native-zano: 34 mocha cases pass, including new coverage that the migration sequence is `configure` first and `run_wallet` last, and that every terminal `startWallet` path leaves exactly the returned wallet running (`test/startWallet.test.ts`, fake module tracks `runningWallets`).
@@ -294,6 +304,10 @@ Receive-side parsing is unchanged, so the memo stays visible for transaction dis
 13. Unit, phase 8: new cases cover the payment-id resolver, the checkpoint gating including the resync race, and the query loop (`test/zano/ZanoEngineCheckpoint.test.ts`, `test/zano/ZanoEngineQueryTransactions.test.ts`, `test/zano/zanoPaymentId.test.ts` in edge-currency-accountbased; `test/transfer.test.ts` and an extended `test/startWallet.test.ts` in react-native-zano).
 14. On-device ladder, phase 8: three stages on an account with four mainnet Zano wallets created April to May 2025, each carrying a roughly 760,000-block catch-up window, every stage against the same wallet-file fixture, with the last two stages the same GUI commit differing only in which packages are installed. Against the published packages the refresh worker sat in `wallet2::refresh` -> `pull_blocks` for 2,269 of 2,269 thread samples and wrote nothing to the wallet file across 8.5 minutes and roughly 72,000 blocks scanned. With this design's packages, all four wallets persisted partial progress and resumed forward across a hard kill instead of rescanning, and Zano-attributable mutex waits stayed at 0 to 1 frames per sample in both stages.
 15. Not covered by that ladder: the startup freeze path, which needs an account whose wallets are not already marked in `securityCheckedWallets`, and the legacy-to-HF6 wallet-file migration, which needs a fixture holding real scan progress. The `checkpointCatchup` race with an in-flight `broadcastTx` ([section 6](#6-detailed-design-edge-currency-accountbased)) is unaddressed and untested.
+
+16. Unit, block height (2026-08-25): four cases in `edge-currency-accountbased/test/zano/ZanoEngineBlockHeight.test.ts` drive `syncNetwork` against a stubbed wallet status. Against the engine before the fix two of them fail with `expected 3000001 to equal 3000000` and `expected 2 to equal 1`, the second being the user-visible count on a transaction mined in the tip block; with the fix the accb suite is 549 passing with one pre-existing unrelated network failure.
+17. In-app A/B on the confirmation count (2026-08-25), iOS simulator, two `edge-funds` Zano wallets: with the fixed engine a 0.0024 ZANO transfer mined in block 3831859 read "7 of 10 Confirmations" at 14:42:25 while the daemon's tip was 3831865, exactly `tip - txHeight + 1`. The accountbased webview bundle was then swapped for one built from the branch head without the fix, the app relaunched, and a later transfer mined in block 3831889 read "2 of 10 Confirmations" at 15:11:43 while the tip was still 3831889: a transaction sitting in the tip block reporting two confirmations is only possible with a wallet block height one above the chain. Swapping the fixed bundle back restored the correct reading. Proof frames attached to edge-currency-accountbased#1092.
+18. Explorer convention, measured twice against the live tip (2026-08-25): explorer.zano.org reported 6 where the fixed app read 7, so it displays `tip - txHeight` and the app stays one above it by design. The originally reported 9-versus-7 gap is therefore one block of engine defect plus one block of display convention.
 
 ## 8. Phase history
 
@@ -382,6 +396,14 @@ Changed:
 - **`AddressInfo`.** Corrected to the shape the native library returns; the previous declaration described fields no native version ever produced.
 
 Review of this round raised the `broadcastTx` race in [section 6](#6-detailed-design-edge-currency-accountbased), a redundant offset-zero fetch, and a note that `runWallet` is private while postponed-run makes it mandatory for every open, so the adopting caller hand-rolls the same RPC in the other repo. None are addressed yet.
+
+### Phase 9: the confirmation count (2026-08-25)
+
+QA reported the app showing "9 of 10 Confirmations" on a transaction the explorer put at 7, and the operator asked for a retest against the remaining open PRs since nothing in them targeted it. It reproduces from the source rather than from the sim, and it is older than this document: the wallet status' two height fields carry different units and the engine took the larger of the two ([section 6](#6-detailed-design-edge-currency-accountbased)).
+
+- Phase 6's own drive recorded the sending wallet passing through "9 of 10 Confirmations" ([Testing](#7-testing) item 8) without recognising it as one too many.
+- Two of the three units in the reported gap are now accounted for: one block of engine defect, fixed here, and one block of explorer convention, which is not a defect ([Testing](#7-testing) item 18).
+- Shipped on `edge-currency-accountbased#1092` as a normal commit rather than a fixup, since it is new scope on a PR this agent does not own.
 
 ## 9. Decisions
 
