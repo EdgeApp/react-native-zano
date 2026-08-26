@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 (2026-08-25)
+
 - added: `runWallet`, which starts the refresh worker for an open wallet. `startWallet` rethrows `ALREADY_EXISTS` for its caller to adopt the already-open wallet, and an adopted wallet does not sync until it is run, so adopting callers need this without reimplementing the raw `run_wallet` response contract.
 - changed: `transfer` no longer takes a `paymentId`, and never sends the request-level payment id. Zano HF6 deprecated the transaction-wide payment id -- the node rejects any non-empty value -- and instead delivers payment ids per destination, embedded in integrated addresses, which the wallet attaches natively. Forwarding the option therefore failed every send that carried one. A caller holding a separate payment id must fold it into an integrated destination address before calling. The per-destination address-info loop is also gone: it read fields the native `get_address_info` has never returned, so it never did anything except spend a native round-trip per recipient.
 - changed: The `AddressInfo` type now matches the native response: `payment_id` is a boolean presence flag, and `is_integrated` does not exist. Both were previously declared with shapes no native version ever produced.
