@@ -16,20 +16,11 @@
       "types": "./lib/src/index.d.ts",
       "default": "./lib/src/index.js"
     },
-    "./node": {
-      "types": "./lib/src/node.d.ts",
-      "default": "./lib/src/node.js"
-    },
     "./lib/src/CppBridge": {
       "types": "./lib/src/CppBridge.d.ts",
       "default": "./lib/src/CppBridge.js"
     },
     "./package.json": "./package.json"
-  },
-  "typesVersions": {
-    "*": {
-      "node": ["lib/src/node.d.ts"]
-    }
   },
   "files": [
     "/android/build.gradle",
@@ -37,14 +28,10 @@
     "/CHANGELOG.md",
     "/ios/",
     "/lib/",
-    "/node.d.ts",
-    "/node.js",
     "/package.json",
-    "/prebuilds/",
     "/react-native-zano.podspec",
     "/README.md",
-    "/src/zano-wrapper/zano-methods.hpp",
-    "/src/node/"
+    "/src/zano-wrapper/zano-methods.hpp"
   ],
   "lint-staged": {
     "*.{js,ts}": "eslint"
@@ -56,7 +43,6 @@
     "prepare": "husky install && lint-staged && rimraf lib && tsc",
     "test": "mocha",
     "update-sources": "ZERO_AR_DATE=1 node -r sucrase/register ./scripts/update-sources.ts",
-    "build-native-host": "ZERO_AR_DATE=1 node -r sucrase/register ./scripts/build-native-host.ts",
     "verify": "npm run lint && npm test && tsc --noEmit -p tsconfig.eslint.json"
   },
   "devDependencies": {
