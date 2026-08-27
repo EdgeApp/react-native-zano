@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fixed: Android runs native Zano calls on a dedicated thread instead of React Native's shared native-modules thread. On the legacy architecture that shared thread also executes UIManager's view commands, so a Zano call that blocked in C++ froze every view update in the app - taps dead, screens frozen - while native scrolling kept working. A blocked call now stalls only Zano.
+
 ## 0.5.0 (2026-08-25)
 
 - added: `runWallet`, which starts the refresh worker for an open wallet. `startWallet` rethrows `ALREADY_EXISTS` for its caller to adopt the already-open wallet, and an adopted wallet does not sync until it is run, so adopting callers need this without reimplementing the raw `run_wallet` response contract.
