@@ -30,6 +30,7 @@ import { cpus } from 'os'
 import { join } from 'path'
 
 import { getNdkPath } from './utils/android-tools'
+import { patchCloseWallet } from './utils/closeWalletPatch'
 import {
   captureExec,
   fileExists,
@@ -81,6 +82,17 @@ async function downloadSources(): Promise<void> {
   const mdPath = join(tmpPath, 'zano_native_lib/Zano/src/crypto/RIPEMD160.h')
   const mdText = await readFile(mdPath, 'utf8')
   await writeFile(mdPath, '#define compress md_compress\n' + mdText)
+
+  // Rework close_wallet so it does not hold the wallet-manager lock while
+  // it waits on the wallet, which permanently deadlocks the manager when a
+  // wallet is closed mid-scan (see closeWalletPatch.ts). Only the Android
+  // libraries build from these sources; iOS links the prebuilt framework:
+  const wmPath = join(
+    tmpPath,
+    'zano_native_lib/Zano/src/wallet/wallets_manager.cpp'
+  )
+  const wmText = await readFile(wmPath, 'utf8')
+  await writeFile(wmPath, patchCloseWallet(wmText))
 }
 
 /**

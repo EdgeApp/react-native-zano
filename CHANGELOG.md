@@ -3,6 +3,7 @@
 ## Unreleased
 
 - fixed: Android runs native Zano calls on a dedicated thread instead of React Native's shared native-modules thread. On the legacy architecture that shared thread also executes UIManager's view commands, so a Zano call that blocked in C++ froze every view update in the app - taps dead, screens frozen - while native scrolling kept working. A blocked call now stalls only Zano.
+- fixed: Closing a wallet while it is catching up on blocks no longer deadlocks the native wallet manager permanently on Android. The SDK's `close_wallet` held the wallet-manager lock while waiting out the wallet's refresh worker, which needed that same lock to reach its stop flags, so the close, the worker, and every Zano call after them hung forever; the app's periodic mid-sync saves tripped this within minutes of importing a wallet. The Android build now rewrites `close_wallet` to detach the wallet from the manager before waiting on it. iOS links the prebuilt Zano framework and runs the same cycle without wedging, so it is unchanged.
 
 ## 0.5.0 (2026-08-25)
 
