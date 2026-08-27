@@ -51,6 +51,10 @@ function isWrongPassword(error: unknown): boolean {
   return error instanceof ZanoError && error.code === 'WRONG_PASSWORD'
 }
 
+function isInvalidFile(error: unknown): boolean {
+  return error instanceof ZanoError && error.code === 'INVALID_FILE'
+}
+
 function isAlreadyExists(error: unknown): boolean {
   return error instanceof ZanoError && error.code === 'ALREADY_EXISTS'
 }
@@ -438,11 +442,13 @@ export class CppBridge {
    * for both roles, so files written by them were keyed with the seed
    * passphrase -- the empty string for most wallets. A file still encrypted
    * that way is re-keyed in place the first time it opens. A file that no
-   * known password opens is deleted and rebuilt from the mnemonic, costing
-   * one re-scan -- but only for a wallet with no seed passphrase. With one
-   * set, the passphrase is far and away the likeliest thing to be wrong, and
-   * rebuilding would restore a different wallet over a file that was intact,
-   * so that case throws instead.
+   * known password opens, or that the SDK cannot parse a wallet out of at
+   * all - the leavings of a crash during the file's first write - is
+   * deleted and rebuilt from the mnemonic, costing one re-scan - but only
+   * for a wallet with no seed passphrase. With one set, the passphrase is
+   * far and away the likeliest thing to be wrong, and rebuilding would
+   * restore a different wallet over a file that was intact, so that case
+   * throws instead.
    *
    * The migration is decided entirely by what the file does, so it is
    * idempotent and self-healing: an interrupted re-key leaves the file on
@@ -522,6 +528,27 @@ export class CppBridge {
     try {
       return await started(await openWith(filePassword))
     } catch (error: unknown) {
+      // A file the SDK cannot parse a wallet header out of - zero bytes
+      // after a crash during its first write, or other corruption - fails
+      // with INVALID_FILE before any password is consulted, so the password
+      // ladder below has nothing to probe. Without this branch the error
+      // propagated as-is and the engine retried the same doomed open
+      // forever. Route it to the same policy as a file no password opens:
+      // without a passphrase, the rebuild recreates the identical wallet at
+      // the cost of a re-scan; with one, an unreadable file cannot
+      // corroborate the passphrase, and a wrong one would rebuild a
+      // different wallet, so refuse.
+      if (isInvalidFile(error)) {
+        if (seedPassword !== '') {
+          throw new Error(
+            'The Zano wallet file is unreadable, and cannot be rebuilt ' +
+              'because a seed passphrase is set'
+          )
+        }
+        log('Zano wallet file is unreadable, rebuilding it')
+        return await started(await rebuild())
+      }
+
       // Anything other than a bad password -- including ALREADY_EXISTS,
       // which callers recover from by adopting the open wallet -- is not
       // ours to handle.

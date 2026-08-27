@@ -416,7 +416,11 @@ describe('startWallet', () => {
     assert.ok(!state.calls.join('\n').includes('deleteWallet'))
   })
 
-  it('does not try legacy passwords after a non-password failure', async () => {
+  it('rebuilds an unreadable file for a wallet with no passphrase', async () => {
+    // A crash during the file's first write leaves a file the SDK cannot
+    // parse - INVALID_FILE before any password is consulted. The engine
+    // used to retry the same doomed open forever; the rebuild recreates the
+    // identical wallet from the mnemonic at the cost of a re-scan.
     const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
     state.openResult = JSON.stringify({
       id: 0,
@@ -425,7 +429,35 @@ describe('startWallet', () => {
     })
     const bridge = makeBridge(state)
 
-    await assert.rejects(bridge.startWallet(MNEMONIC, '', STORAGE_PATH))
+    const wallet = await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    assert.ok(state.calls.join('\n').includes('deleteWallet'))
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+    assert.deepEqual([...(state.runningWallets ?? [])], [wallet.wallet_id])
+    // The password ladder has nothing to probe on a file that fails before
+    // password checking, so the failing open must be the only one:
+    assert.equal(state.calls.filter(call => call.startsWith('open(')).length, 1)
+  })
+
+  it('refuses to rebuild an unreadable file for a passphrase wallet', async () => {
+    // An unreadable file cannot corroborate the passphrase, and rebuilding
+    // with a wrong one would restore a different wallet, so this stays the
+    // same refusal the no-password-opens path applies:
+    const state = makeState({ filePassword: 'hunter2', mnemonic: MNEMONIC })
+    state.openResult = JSON.stringify({
+      id: 0,
+      jsonrpc: '2.0',
+      error: { code: 'INVALID_FILE', message: '' }
+    })
+    const bridge = makeBridge(state)
+
+    await assert.rejects(
+      bridge.startWallet(MNEMONIC, 'hunter2', STORAGE_PATH),
+      /unreadable/
+    )
+
+    assert.ok(!state.calls.join('\n').includes('deleteWallet'))
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, 'hunter2')
     assert.equal(state.calls.filter(call => call.startsWith('open(')).length, 1)
   })
 
