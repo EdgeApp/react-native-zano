@@ -220,11 +220,19 @@ export interface RecentTransaction {
       amount: number
       asset_id: string
       index: number
+      /**
+       * The intrinsic payment id as a raw integer, zero when absent. Treat
+       * it as a presence signal only: the value is a uint64 that can pass
+       * 2^53 and lose precision in JSON. Read actual ids from
+       * `subtransfers_by_pid`, which carries them as hex strings.
+       */
+      payment_id?: number
     }>
     spent?: Array<{
       amount: number
       asset_id: string
       index: number
+      payment_id?: number
     }>
   }
   fee: number
@@ -232,12 +240,27 @@ export interface RecentTransaction {
   is_mining: boolean
   is_mixing: boolean
   is_service: boolean
-  payment_id: string
+  /**
+   * Destination addresses recorded by the sending wallet, empty for
+   * incoming transfers. Wallet-local history, not chain data: a wallet
+   * restored from its seed has none of these.
+   */
+  remote_addresses?: string[]
   show_sender: boolean
-  subtransfers: Array<{
-    amount: number
-    asset_id: string
-    is_income: boolean
+  /**
+   * Amounts grouped by intrinsic payment id and then by asset, the
+   * essential part of the entry since HF6. `payment_id` is hex, or the
+   * empty string for amounts that carry no id - a sender's own spent
+   * inputs and change always land in the empty-id group, so a sent
+   * transfer's recipient ids never appear here.
+   */
+  subtransfers_by_pid?: Array<{
+    payment_id: string
+    subtransfers: Array<{
+      amount: number
+      asset_id: string
+      is_income: boolean
+    }>
   }>
   timestamp: number
   transfer_internal_index: number

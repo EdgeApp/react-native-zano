@@ -722,12 +722,20 @@ export class CppBridge {
     return result
   }
 
+  /**
+   * Fetches a page of wallet history. Uses `get_recent_txs_and_info3`, the
+   * HF6-ready endpoint: the v2 variant reports only the deprecated
+   * transaction-wide payment id - an empty string for every id created
+   * since HF6, when ids moved into individual outputs - and its legacy
+   * serializer refuses entries carrying more than one distinct per-output
+   * id, which the HF6 migration guide says to expect.
+   */
   async getTransactions(
     walletId: number,
     offset: number = 0
   ): Promise<GetRecentTransactionsResponse> {
     const params = {
-      method: 'get_recent_txs_and_info2',
+      method: 'get_recent_txs_and_info3',
       params: {
         count: 100,
         exclude_mining_txs: true,
