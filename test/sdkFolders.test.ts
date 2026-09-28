@@ -3,7 +3,7 @@ import { strict as assert } from 'assert'
 import { findSdkFolders } from '../scripts/utils/sdkFolders'
 
 // The declarations as they appear in the SDK's `plain_wallet_api.cpp`,
-// verified identical at zano_native_lib 239d4a39 and 91085c0.
+// verified identical at zano_native_lib 239d4a39, 91085c0 and d49c25e.
 const REAL_DEFINES = `
 #define ANDROID_PACKAGE_NAME    "com.zano_mobile"
 

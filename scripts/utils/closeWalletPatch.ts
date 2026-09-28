@@ -6,7 +6,7 @@ const hint =
   'it to the new body.'
 
 /**
- * `close_wallet` as pinned at zano_native_lib 91085c0, modulo invisible
+ * `close_wallet` as pinned at zano_native_lib d49c25e, modulo invisible
  * trailing whitespace. The transform refuses to run unless the function it
  * found matches this byte-for-byte after trailing whitespace is stripped,
  * so ANY upstream drift - not just drift through the lines the deadlock

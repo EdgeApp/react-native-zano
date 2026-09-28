@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- changed: Update `zano_native_lib` to `d49c25e` (Zano build 601) for the HF7 chain restart
+
 ## 0.5.1 (2026-08-28)
 
 - changed: `getTransactions` queries `get_recent_txs_and_info3`, the HF6-ready history endpoint. The old endpoint reported only the deprecated transaction-wide payment id - an empty string for every id created since HF6, when ids moved into individual outputs - and its legacy serializer refuses entries that carry more than one distinct per-output id, which the HF6 migration guide says to expect. `RecentTransaction` now exposes `subtransfers_by_pid`, amounts grouped by hex payment id, in place of the flat `subtransfers` list and the always-stale `payment_id` field, along with the sender-recorded `remote_addresses`.
