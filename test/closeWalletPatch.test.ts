@@ -3,7 +3,7 @@ import { strict as assert } from 'assert'
 import { patchCloseWallet } from '../scripts/utils/closeWalletPatch'
 
 // The function as it appears in the SDK's `wallets_manager.cpp` at
-// zano_native_lib 91085c0, modulo invisible trailing whitespace, the one
+// zano_native_lib d49c25e, modulo invisible trailing whitespace, the one
 // difference the full-body comparison forgives. This is an independent
 // transcription: the suite passing proves it agrees with the copy the
 // transform itself pins.
