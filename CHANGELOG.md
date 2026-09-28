@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 (2026-09-28)
+
 - changed: Update `zano_native_lib` to `d49c25e` (Zano build 601) for the HF7 chain restart
 
 ## 0.5.1 (2026-08-28)
