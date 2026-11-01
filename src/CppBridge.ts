@@ -65,6 +65,11 @@ export class CppBridge {
   // Whether `configurePostponedRun` has succeeded. The native flag it sets
   // is process-wide and sticky, so one success covers every later call:
   private postponedRunConfigured: boolean = false
+  // Every `startWallet` waits on this, so the sweep never opens a file that a
+  // start is working on. New files are never empty-keyed, so once per process
+  // is enough. Nothing records a finished sweep, so each launch repeats it at
+  // the cost of one failed open per other wallet file.
+  private emptyKeyedSweep?: Promise<void>
 
   constructor(zanoModule: NativeZanoModule) {
     // The native side omits `documentDirectory` when it could not create the
@@ -471,6 +476,9 @@ export class CppBridge {
     // Open without running instead, and start the worker explicitly once the
     // wallet this method returns is the one that should sync.
     await this.configurePostponedRun()
+    this.emptyKeyedSweep ??= this.sweepEmptyKeyedFiles(storagePath, log)
+    await this.emptyKeyedSweep
+
     const started = async (wallet: WalletDetails): Promise<WalletDetails> => {
       await this.runWallet(wallet.wallet_id)
       return wallet
@@ -674,6 +682,62 @@ export class CppBridge {
 
     log('Zano wallet file opens with no known password, rebuilding it')
     return await started(await rebuild())
+  }
+
+  /**
+   * Deletes every wallet file that still opens with the empty password.
+   *
+   * Versions 0.3.0 and earlier keyed files with the seed passphrase, and
+   * creating a wallet wrote one at the wallet's own storage path, so these
+   * files hold that wallet's real seed and spend keys. `startWallet` re-keys
+   * only the wallet it was asked for, which never reaches an archived or
+   * deleted wallet, a wallet on another account on this device, or a wallet
+   * nothing ever started.
+   *
+   * Deleting is safe because the file is a cache: the seed lives in the
+   * account's keys, and the next `startWallet` for that wallet restores it,
+   * costing one re-scan. The caller's own file is skipped, since its start
+   * re-keys it in place without a re-scan.
+   *
+   * Never throws. A failure here leaves the file where it was, which is no
+   * worse than before the sweep, and must not stop the wallet from starting.
+   */
+  private async sweepEmptyKeyedFiles(
+    callerStoragePath: string,
+    log: (message: string) => void
+  ): Promise<void> {
+    let deleted = 0
+    try {
+      const files = await this.getWalletFiles()
+      if (!('items' in files)) return
+
+      for (const item of files.items) {
+        if (item === callerStoragePath) continue
+        try {
+          const wallet = this.expectWallet(
+            this.handleRpcResponse(await this.open(item, ''))
+          )
+          const { response } = await this.closeWallet(wallet.wallet_id)
+          if (response !== 'OK') {
+            throw new Error(`closeWallet returned ${response}`)
+          }
+          // The native delete reports OK whether or not it removed anything:
+          await this.deleteWallet(item)
+          if (await this.isWalletExist(item)) {
+            throw new Error('the file survived the delete')
+          }
+          deleted++
+        } catch (error: unknown) {
+          // WRONG_PASSWORD is the healthy answer: the file is already keyed.
+          if (!isWrongPassword(error)) {
+            log(`Zano empty-keyed sweep skipped a file: ${String(error)}`)
+          }
+        }
+      }
+    } catch (error: unknown) {
+      log(`Zano empty-keyed sweep stopped: ${String(error)}`)
+    }
+    if (deleted > 0) log(`Zano empty-keyed sweep deleted ${deleted} file(s)`)
   }
 
   async stopWallet(walletId: number): Promise<string> {

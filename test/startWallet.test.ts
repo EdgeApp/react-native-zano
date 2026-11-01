@@ -86,6 +86,8 @@ describe('startWallet', () => {
     // and only then start the worker:
     assert.deepEqual(state.calls, [
       'syncCall(configure,0,{"postponed_run_wallet":true})',
+      // The empty-keyed sweep's listing, which skips this wallet's own file:
+      'getWalletFiles()',
       'getWalletFiles()',
       `open(${STORAGE_PATH},${DERIVED})`,
       `open(${STORAGE_PATH},)`,
@@ -522,5 +524,181 @@ describe('generateSeedPhrase', () => {
       /BUSY/
     )
     assert.ok(!state.calls.join('\n').includes('deleteWallet'))
+  })
+})
+
+describe('empty-keyed sweep', () => {
+  const OTHER = 'BB'
+  const THIRD = 'CC'
+  const OTHER_MNEMONIC = 'other wallet mnemonic'
+
+  const makeSweepState = (others: {
+    [path: string]: FakeWalletFile
+  }): FakeState => {
+    const state = makeState({ filePassword: DERIVED, mnemonic: MNEMONIC })
+    for (const path of Object.keys(others)) state.files.set(path, others[path])
+    return state
+  }
+
+  const emptyKeyed: FakeWalletFile = {
+    filePassword: '',
+    mnemonic: OTHER_MNEMONIC
+  }
+  const rekeyed: FakeWalletFile = {
+    filePassword: deriveWalletFilePassword(OTHER_MNEMONIC),
+    mnemonic: OTHER_MNEMONIC
+  }
+
+  it('deletes empty-keyed files other wallets left behind', async () => {
+    const state = makeSweepState({ [OTHER]: emptyKeyed })
+    const messages: string[] = []
+
+    await makeBridge(state).startWallet(MNEMONIC, '', STORAGE_PATH, {
+      log: message => messages.push(message)
+    })
+
+    assert.ok(!state.files.has(OTHER))
+    assert.deepEqual(messages, ['Zano empty-keyed sweep deleted 1 file(s)'])
+  })
+
+  it('closes a file before deleting it', async () => {
+    const state = makeSweepState({ [OTHER]: emptyKeyed })
+
+    await makeBridge(state).startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    const close = state.calls.findIndex(call => call.startsWith('closeWallet'))
+    const remove = state.calls.indexOf(`deleteWallet(${OTHER})`)
+    assert.ok(close !== -1 && close < remove, state.calls.join('\n'))
+  })
+
+  it('keeps files that already reject the empty password', async () => {
+    const state = makeSweepState({ [OTHER]: rekeyed })
+    const messages: string[] = []
+
+    await makeBridge(state).startWallet(MNEMONIC, '', STORAGE_PATH, {
+      log: message => messages.push(message)
+    })
+
+    assert.ok(state.files.has(OTHER))
+    assert.ok(!state.calls.includes(`deleteWallet(${OTHER})`))
+    assert.deepEqual(messages, [])
+  })
+
+  it('re-keys rather than deletes the file of the wallet being started', async () => {
+    const state = makeState({ filePassword: '', mnemonic: MNEMONIC })
+
+    await makeBridge(state).startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    assert.equal(state.files.get(STORAGE_PATH)?.filePassword, DERIVED)
+    assert.ok(!state.calls.includes(`deleteWallet(${STORAGE_PATH})`))
+  })
+
+  it('rebuilds a swept wallet when it next starts', async () => {
+    const state = makeSweepState({ [OTHER]: emptyKeyed })
+    const bridge = makeBridge(state)
+
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    await bridge.startWallet(OTHER_MNEMONIC, '', OTHER)
+
+    assert.equal(
+      state.files.get(OTHER)?.filePassword,
+      deriveWalletFilePassword(OTHER_MNEMONIC)
+    )
+  })
+
+  it('makes concurrent starts wait for one sweep', async () => {
+    const state = makeSweepState({ [OTHER]: emptyKeyed, [THIRD]: rekeyed })
+    const bridge = makeBridge(state)
+
+    await Promise.all([
+      bridge.startWallet(MNEMONIC, '', STORAGE_PATH),
+      bridge.startWallet(OTHER_MNEMONIC, '', OTHER)
+    ])
+
+    // Only the sweep opens with the empty password here, and it ran once,
+    // ahead of the second start's own restore:
+    const sweepOpens = state.calls.filter(call => call === `open(${THIRD},)`)
+    assert.equal(sweepOpens.length, 1)
+    assert.ok(
+      state.calls.indexOf(`deleteWallet(${OTHER})`) <
+        state.calls.findIndex(call => call.startsWith(`restore(`)),
+      state.calls.join('\n')
+    )
+    assert.equal(
+      state.files.get(OTHER)?.filePassword,
+      deriveWalletFilePassword(OTHER_MNEMONIC)
+    )
+  })
+
+  it('leaves a file alone when it is open elsewhere', async () => {
+    const state = makeSweepState({ [OTHER]: emptyKeyed })
+    const bridge = makeBridge(state)
+    state.openWallets?.set(99, OTHER)
+    const messages: string[] = []
+
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH, {
+      log: message => messages.push(message)
+    })
+
+    assert.ok(state.files.has(OTHER))
+    assert.equal(messages.length, 1)
+    assert.match(messages[0], /skipped a file/)
+  })
+
+  it('does not delete a file it could not close', async () => {
+    const state = makeSweepState({ [OTHER]: emptyKeyed })
+    state.closeResult = 'WALLET_WRONG_ID'
+    const messages: string[] = []
+
+    await makeBridge(state).startWallet(MNEMONIC, '', STORAGE_PATH, {
+      log: message => messages.push(message)
+    })
+
+    assert.ok(state.files.has(OTHER))
+    assert.match(messages[0], /closeWallet returned WALLET_WRONG_ID/)
+  })
+
+  it('reports a delete that fails, and still starts the wallet', async () => {
+    const state = makeSweepState({ [OTHER]: emptyKeyed })
+    state.deleteFails = true
+    const messages: string[] = []
+
+    const wallet = await makeBridge(state).startWallet(
+      MNEMONIC,
+      '',
+      STORAGE_PATH,
+      { log: message => messages.push(message) }
+    )
+
+    assert.equal(typeof wallet.wallet_id, 'number')
+    assert.match(messages[0], /survived the delete/)
+  })
+
+  it('never puts a seed in its log messages', async () => {
+    const state = makeSweepState({ [OTHER]: emptyKeyed, [THIRD]: emptyKeyed })
+    state.deleteFails = true
+    const messages: string[] = []
+
+    await makeBridge(state).startWallet(MNEMONIC, '', STORAGE_PATH, {
+      log: message => messages.push(message)
+    })
+
+    assert.ok(messages.length > 0)
+    for (const message of messages) {
+      assert.ok(!message.includes(OTHER_MNEMONIC))
+      assert.ok(!message.includes(MNEMONIC))
+    }
+  })
+
+  it('sweeps once per bridge', async () => {
+    const state = makeSweepState({ [OTHER]: rekeyed })
+    const bridge = makeBridge(state)
+
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+    state.openWallets?.clear()
+    await bridge.startWallet(MNEMONIC, '', STORAGE_PATH)
+
+    const sweepOpens = state.calls.filter(call => call === `open(${OTHER},)`)
+    assert.equal(sweepOpens.length, 1)
   })
 })
